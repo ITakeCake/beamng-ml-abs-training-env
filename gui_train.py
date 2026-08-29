@@ -21,22 +21,23 @@ from vehicle_scanner import (
     scan_models, scan_trims, scan_custom_configs, resolve_part_config,
     unique_model_labels, SUPPORTED_ML_ABS_MODELS,
 )
+from compat import check_compat
+import asset_installer
 
 CUSTOM_TRIM_LABEL = "Custom..."
 
 SETTINGS_PATH = os.path.join(HERE, "settings.json")
+ASSETS_DIR = os.path.join(HERE, "assets")
 
 log = setup_logging(os.path.join(HERE, "logs", "gui.log"), component="gui")
 
 try:
     import beamngpy
     _BNG_VER = beamngpy.__version__.strip()
-    BEAMNGPY_OK = _BNG_VER == "1.34.1"
 except ImportError:
     _BNG_VER = None
-    BEAMNGPY_OK = False
-log.info("=== gui start: pid=%d python=%s beamngpy=%s ok=%s",
-         os.getpid(), sys.executable, _BNG_VER, BEAMNGPY_OK)
+log.info("=== gui start: pid=%d python=%s beamngpy=%s",
+         os.getpid(), sys.executable, _BNG_VER)
 
 TRAIN_LOG_TAIL = 20   # lines of the run's train.log shown when the trainer dies
 
@@ -200,8 +201,55 @@ class ResidualTrainerGUI:
         self.sim_status_var = tk.StringVar(value="")
         ttk.Label(row, textvariable=self.sim_status_var).pack(side="left", padx=8)
 
+        row = ttk.LabelFrame(t, text="Compatibility"); row.pack(fill="x", **pad)
+        self.sim_compat_var = tk.StringVar(value="")
+        ttk.Label(row, textvariable=self.sim_compat_var, wraplength=560,
+                 justify="left").pack(side="left", padx=6, pady=4)
+        self.sim_proceed_anyway_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(row, text="Proceed even if incompatible",
+                       variable=self.sim_proceed_anyway_var).pack(side="right", padx=6)
+
+        row = ttk.LabelFrame(t, text="Game Assets (ML-ABS mod + reference car configs)")
+        row.pack(fill="x", **pad)
+        ttk.Button(row, text="Check Status",
+                  command=self._check_asset_status).pack(side="left", padx=6, pady=4)
+        ttk.Button(row, text="Install / Update Assets",
+                  command=self._install_assets).pack(side="left", padx=6)
+        self.sim_asset_status_var = tk.StringVar(value="")
+        ttk.Label(row, textvariable=self.sim_asset_status_var).pack(side="left", padx=8)
+
         self._on_sim_game_changed()
         self._refresh_sim_folder_status()
+        self.sim_folder_var.trace_add("write", lambda *a: self._refresh_compat_status())
+        self._refresh_compat_status()
+
+    def _refresh_compat_status(self):
+        game_version = guess_version_from_folder(self.sim_folder_var.get())
+        compat = check_compat(game_version, _BNG_VER)
+        self.sim_compat_var.set(compat.message)
+
+    def _check_asset_status(self):
+        userpath = self.sim_userpath_var.get() or default_userpath(self.sim_game_var.get())
+        status = asset_installer.installed_status(ASSETS_DIR, userpath)
+        counts = {}
+        for v in status.values():
+            counts[v] = counts.get(v, 0) + 1
+        log.info("asset status check: userpath=%s counts=%s", userpath, counts)
+        self.sim_asset_status_var.set(
+            ", ".join(f"{v}: {n}" for v, n in sorted(counts.items())) or "no assets")
+
+    def _install_assets(self):
+        userpath = self.sim_userpath_var.get() or default_userpath(self.sim_game_var.get())
+        report = asset_installer.install_assets(ASSETS_DIR, userpath)
+        counts = {}
+        for _path, action in report:
+            counts[action] = counts.get(action, 0) + 1
+        log.info("assets installed to %s: %s", userpath, counts)
+        self.sim_asset_status_var.set(
+            ", ".join(f"{a}: {n}" for a, n in sorted(counts.items())))
+        messagebox.showinfo("Assets installed",
+                            f"Installed to {userpath}:\n\n"
+                            + "\n".join(f"{a}: {n}" for a, n in sorted(counts.items())))
 
     def _on_sim_game_changed(self):
         # .drive has no -gfx null; headless only makes sense for .tech.
@@ -429,13 +477,6 @@ class ResidualTrainerGUI:
         return os.path.join(HERE, "runs", self.run_name_var.get())
 
     def start(self):
-        if not BEAMNGPY_OK:
-            log.error("START refused: beamngpy=%s (need 1.34.1)", _BNG_VER)
-            messagebox.showerror("beamngpy version",
-                                 "beamngpy is missing or does not match the pinned "
-                                 "1.34.1 this project's BeamNG.tech install speaks.")
-            return
-
         settings = self._collect_settings()
         log.info("START pressed: settings=%s", settings)
         problems = validate_settings(settings)
@@ -453,6 +494,21 @@ class ResidualTrainerGUI:
             self.notebook.select(self.sim_tab)
             return
         save_sim_config(sim_cfg, SETTINGS_PATH)  # train_residual.py reads this by default
+
+        game_version = guess_version_from_folder(sim_cfg.game_folder)
+        compat = check_compat(game_version, _BNG_VER)
+        log.info("compat check: game_version=%s beamngpy=%s ok=%s",
+                 game_version, _BNG_VER, compat.ok)
+        if compat.ok is False and not self.sim_proceed_anyway_var.get():
+            log.warning("START refused: %s", compat.message)
+            messagebox.showerror(
+                "beamngpy / BeamNG version mismatch (Simulator tab)",
+                compat.message + (f"\n\nFix: {compat.fix_command}" if compat.fix_command else "")
+                + "\n\nOr tick 'Proceed even if incompatible' on the Simulator tab.")
+            self.notebook.select(self.sim_tab)
+            return
+        elif compat.ok is not True:
+            log.warning("proceeding despite compat check: %s", compat.message)
 
         pid_path = os.path.join(self._run_dir(), "pid.txt")
         if os.path.exists(pid_path):
