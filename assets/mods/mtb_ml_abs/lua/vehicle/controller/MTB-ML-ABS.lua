@@ -92,6 +92,11 @@ local WARMUP_BRAKE  = 0.05
 local pendingWarmup = 0
 
 -- ---- weights module (loaded lazily, fails loud if missing) ----------
+-- Module name is configurable per jbeam part (see init(jbeamData) below) so
+-- one controller can be shared by many trained-model parts in the same
+-- MODEL_SLOT_TYPE slot -- each part's jbeamData.weights picks its own weights
+-- file. Unset (nil) reproduces the exact pre-multi-model default.
+local weightsModule = "controller/mtb_ml_weights"
 local W = nil                              -- the weights table
 local weightsOk = false
 local warnedMissing = false
@@ -337,13 +342,13 @@ end
 local function loadWeights()
   -- BeamNG vehicle-lua require uses forward-slash subdir paths (see
   -- engine controller.lua:460-499: require("controller/" .. fileName)).
-  local ok, mod = pcall(require, "controller/mtb_ml_weights")
+  local ok, mod = pcall(require, weightsModule)
   if not ok or type(mod) ~= "table" then
     weightsOk = false
     W = nil
     if not warnedMissing then
       warnedMissing = true
-      print("[MTB-ML-ABS] !!! FATAL: weights module 'controller/mtb_ml_weights' "
+      print("[MTB-ML-ABS] !!! FATAL: weights module '" .. weightsModule .. "' "
         .. "is MISSING or invalid -> ML ABS DISABLED, brakes NOT written. err="
         .. tostring(mod))
     end
@@ -987,6 +992,10 @@ end
 -- =====================================================================
 local function init(jbeamData)
   print("[MTB-ML-ABS] init — SAC ML ABS controller loading")
+  -- Multi-model support: a jbeam part in MODEL_SLOT_TYPE can set
+  -- {"weights": "mlabs_w_<run>"} to pick its own weights module. No override
+  -- (nil) reproduces the original single-model default exactly.
+  weightsModule = "controller/" .. ((jbeamData and jbeamData.weights) or "mtb_ml_weights")
   timeAccum = 0
   active = false
   mlabsTicks = 0

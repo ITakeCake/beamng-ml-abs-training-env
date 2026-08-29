@@ -23,11 +23,14 @@ from vehicle_scanner import (
 )
 from compat import check_compat
 import asset_installer
+import mod_output
+from model_registry import list_finished_runs
 
 CUSTOM_TRIM_LABEL = "Custom..."
 
 SETTINGS_PATH = os.path.join(HERE, "settings.json")
 ASSETS_DIR = os.path.join(HERE, "assets")
+RUNS_DIR = os.path.join(HERE, "runs")
 
 log = setup_logging(os.path.join(HERE, "logs", "gui.log"), component="gui")
 
@@ -73,10 +76,13 @@ class ResidualTrainerGUI:
         self.notebook.pack(fill="both", expand=True)
         self.training_tab = ttk.Frame(self.notebook)
         self.sim_tab = ttk.Frame(self.notebook)
+        self.output_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.training_tab, text="Training")
         self.notebook.add(self.sim_tab, text="Simulator")
+        self.notebook.add(self.output_tab, text="Output")
 
         self._build_simulator_tab(pad)
+        self._build_output_tab(pad)
 
         # Row 1: algo dropdown
         row1 = ttk.Frame(self.training_tab)
@@ -430,6 +436,105 @@ class ResidualTrainerGUI:
                 f"{', '.join(sorted(SUPPORTED_ML_ABS_MODELS))} is currently supported.")
         else:
             self.car_warning_var.set("")
+
+    # ------------------------------------------------------------- output tab
+    def _build_output_tab(self, pad):
+        t = self.output_tab
+
+        row = ttk.LabelFrame(t, text="Deploy to game")
+        row.pack(fill="x", **pad)
+        ttk.Button(row, text="Generate ML ABS for all cars",
+                  command=self._generate_all_cars).pack(side="left", padx=6, pady=4)
+        self.output_generate_status_var = tk.StringVar(value="")
+        ttk.Label(row, textvariable=self.output_generate_status_var).pack(
+            side="left", padx=8)
+
+        row = ttk.LabelFrame(t, text="Trained models")
+        row.pack(fill="both", expand=True, **pad)
+
+        cols = ("run_name", "algo", "model", "best_avg_g")
+        self.output_tree = ttk.Treeview(row, columns=cols, show="headings", height=10)
+        for c, label, w in (("run_name", "Run", 200), ("algo", "Algo", 60),
+                           ("model", "Car", 100), ("best_avg_g", "Best avg_g", 90)):
+            self.output_tree.heading(c, text=label)
+            self.output_tree.column(c, width=w)
+        self.output_tree.pack(side="left", fill="both", expand=True, padx=6, pady=4)
+
+        btns = ttk.Frame(row)
+        btns.pack(side="left", fill="y", padx=6)
+        ttk.Button(btns, text="Refresh", command=self._refresh_output_models).pack(
+            fill="x", pady=2)
+        ttk.Button(btns, text="Export to Game", command=self._export_selected_model).pack(
+            fill="x", pady=2)
+        ttk.Button(btns, text="Remove from Game", command=self._remove_selected_model).pack(
+            fill="x", pady=2)
+
+        self.output_status_var = tk.StringVar(value="")
+        ttk.Label(t, textvariable=self.output_status_var, wraplength=560,
+                 justify="left").pack(fill="x", **pad)
+
+        self._output_runs = {}   # run_name -> RunInfo, refreshed by _refresh_output_models
+        self._refresh_output_models()
+
+    def _output_mod_dir(self):
+        return mod_output.mod_dir_for(content_userpath(self._collect_sim_config()))
+
+    def _generate_all_cars(self):
+        cfg = self._collect_sim_config()
+        vehicles_dir = os.path.join(cfg.game_folder, "content", "vehicles")
+        if not cfg.game_folder or not os.path.isdir(vehicles_dir):
+            messagebox.showerror("Generate ML ABS",
+                                 "Set 'Game folder' on the Simulator tab first.")
+            self.notebook.select(self.sim_tab)
+            return
+        written, skipped = mod_output.generate_all_cars(vehicles_dir, self._output_mod_dir())
+        log.info("generate_all_cars: written=%d skipped=%s", len(written), skipped)
+        self.output_generate_status_var.set(
+            f"{len(written)} car(s) generated, {len(skipped)} skipped (no ABS slot)")
+        messagebox.showinfo("ML ABS generated",
+                            f"Generated for {len(written)} car(s).\n\n"
+                            f"Skipped (no ABS slot in this car): "
+                            f"{', '.join(skipped) if skipped else '(none)'}")
+
+    def _refresh_output_models(self):
+        for row in self.output_tree.get_children():
+            self.output_tree.delete(row)
+        self._output_runs = {}
+        for run in list_finished_runs(RUNS_DIR):
+            self._output_runs[run.run_name] = run
+            g = f"{run.best_avg_g:.3f}" if run.best_avg_g is not None else "--"
+            self.output_tree.insert("", "end", iid=run.run_name,
+                                    values=(run.run_name, run.algo, run.model, g))
+        log.info("output tab: %d finished run(s) found", len(self._output_runs))
+
+    def _selected_run(self):
+        sel = self.output_tree.selection()
+        if not sel:
+            messagebox.showwarning("No model selected", "Select a run in the table first.")
+            return None
+        return self._output_runs.get(sel[0])
+
+    def _export_selected_model(self):
+        run = self._selected_run()
+        if run is None:
+            return
+        self.output_status_var.set(f"Exporting {run.run_name}...")
+        self.root.update_idletasks()
+        ok, msg = mod_output.export_model_to_game(run, self._output_mod_dir())
+        log.info("export %s -> %s: ok=%s msg=%s", run.run_name, run.model, ok, msg[:300])
+        if ok:
+            self.output_status_var.set(f"Exported {run.run_name} to {run.model}: {msg}")
+        else:
+            self.output_status_var.set(f"Export FAILED for {run.run_name}")
+            messagebox.showerror("Export failed", f"{run.run_name}:\n\n{msg}")
+
+    def _remove_selected_model(self):
+        run = self._selected_run()
+        if run is None:
+            return
+        mod_output.remove_model_from_game(run, self._output_mod_dir())
+        log.info("removed %s from game (%s)", run.run_name, run.model)
+        self.output_status_var.set(f"Removed {run.run_name} from the game.")
 
     def _tk_exception(self, exc_type, exc, tb):
         log.error("tkinter callback exception: %s: %s", exc_type.__name__, exc,
