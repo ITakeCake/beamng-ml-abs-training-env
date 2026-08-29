@@ -66,13 +66,9 @@ ABS_BEHAVIOR = {"slam": "off", "stock": "realistic"}
 
 def check_supported(grip, radius_m):
     """Guard for dimensions the runner does not implement yet. Refusing loudly
-    beats silently measuring dry asphalt / a straight line and writing the
-    result under a key that claims otherwise -- a wrong calibration row is
-    worse than a missing one, because training will happily consume it."""
-    if float(grip) != 1.0:
-        raise NotImplementedError(
-            f"grip={grip} needs the runtime ground-model change (PLAN_V2 section 5); "
-            f"not implemented yet -- refusing rather than silently measuring dry asphalt.")
+    beats silently measuring a straight line and writing the result under a key
+    that claims otherwise -- a wrong calibration row is worse than a missing
+    one, because training will happily consume it."""
     if radius_m is not STRAIGHT:
         raise NotImplementedError(
             f"radius_m={radius_m} needs the arc reference path (PLAN_V2 section 4); "
@@ -175,7 +171,7 @@ class ReferenceRunner:
                 shutil.copy2(src, veh_dir / pc)
         log.info("installed telemetry + reference cars -> %s", user_root)
 
-    def measure_stop(self, speed_mph, grip=1.0, radius_m=STRAIGHT):
+    def measure_stop(self, speed_mph, grip=1.0, radius_m=STRAIGHT, lead_seconds=0.0):
         """One reference stop. Returns the standard 2 kHz brake-event result."""
         check_supported(grip, radius_m)
 
@@ -189,6 +185,9 @@ class ReferenceRunner:
         # NEVER setBrakes here: releaseBrakes unlatches perWheelMode so the stock
         # pipeline (and the stock ABS, when present) owns brake torque entirely.
         self.vehicle.queue_lua_command("extensions.abstelemetry.releaseBrakes()")
+        # Always start from stock tire grip: the previous episode's multiplier
+        # must not leak into this one's approach or its measurement.
+        self.vehicle.queue_lua_command("extensions.abstelemetry.restoreGrip()")
         self.bng.step(15)
         self.vehicle.queue_lua_command(
             f'wheels.setABSBehavior("{ABS_BEHAVIOR[self.reference]}")')
@@ -224,6 +223,12 @@ class ReferenceRunner:
         # --- 2 kHz-exact brake onset (identical to training) ---
         self.vehicle.queue_lua_command(
             f"extensions.abstelemetry.armBrakeSlam({target_ms})")
+        # Grip is armed the SAME way training arms it (at brake onset, after the
+        # slam target is set) -- a reference measured with different timing is
+        # not comparable to the runs it is meant to be the ruler for.
+        if float(grip) != 1.0:
+            self.vehicle.queue_lua_command(
+                f"extensions.abstelemetry.armGripChange({float(grip)}, {lead_seconds})")
         fired = False
         for _ in range(600):
             self.bng.step(20)
@@ -269,6 +274,9 @@ class ReferenceRunner:
         result = {
             "reference": self.reference,
             "speed_mph": speed_mph,
+            "grip": float(grip),
+            "grip_applied": float(e.get("tel_grip_mult", 1.0)),
+            "grip_nodes": int(e.get("tel_grip_nodes", 0)),
             "stopped": stopped,
             "avg_g_arc": float(e.get("tel_last_brake_avg_g_arc", 0.0)),
             "dist_arc": float(e.get("tel_last_brake_dist_arc", 0.0)),
@@ -293,9 +301,9 @@ class ReferenceRunner:
             pass
 
 
-def run_calibration(sim_cfg, car, speeds, reps, grip=1.0, radius_m=STRAIGHT,
-                    out_dir=None, port=None):
-    """Measures both references at every requested speed and writes the table."""
+def run_calibration(sim_cfg, car, speeds, reps, grips=(1.0,), radius_m=STRAIGHT,
+                    out_dir=None, port=None, lead_seconds=0.0):
+    """Measures both references at every (speed, grip) and writes the table."""
     out_dir = out_dir or os.path.join(HERE, "calibration")
     path = os.path.join(out_dir, f"{car}.json")
     table = CalibrationTable.load(path) if os.path.exists(path) else CalibrationTable(car=car)
@@ -304,14 +312,16 @@ def run_calibration(sim_cfg, car, speeds, reps, grip=1.0, radius_m=STRAIGHT,
         runner = ReferenceRunner(sim_cfg, reference, port=port)
         try:
             for mph in speeds:
-                values = []
-                for rep in range(reps):
-                    r = runner.measure_stop(mph, grip=grip, radius_m=radius_m)
-                    values.append(r["avg_g_arc"])
-                    time.sleep(0.5)
-                key = config_key(grip=grip, speed_mph=mph, radius_m=radius_m)
-                table.put(key, reference, summarize(values))
-                log.info("calibrated %s %s: %s", reference, key, summarize(values))
+                for grip in grips:
+                    values = []
+                    for rep in range(reps):
+                        r = runner.measure_stop(mph, grip=grip, radius_m=radius_m,
+                                                lead_seconds=lead_seconds)
+                        values.append(r["avg_g_arc"])
+                        time.sleep(0.5)
+                    key = config_key(grip=grip, speed_mph=mph, radius_m=radius_m)
+                    table.put(key, reference, summarize(values))
+                    log.info("calibrated %s %s: %s", reference, key, summarize(values))
         finally:
             runner.close()
         time.sleep(2)
@@ -332,6 +342,12 @@ def parse_args():
     p.add_argument("--car", default="etk800")
     p.add_argument("--speeds", default="60", help='e.g. "60,90,120"')
     p.add_argument("--reps", type=int, default=3)
+    p.add_argument("--grips", default="1.0",
+                   help='tire grip levels to calibrate, e.g. "1.0,0.75,0.5" '
+                        "(1.0 = stock tires)")
+    p.add_argument("--grip-lead", type=float, default=0.0,
+                   help="apply grip this many seconds before brake onset "
+                        "(0 = same physics tick); must match training")
     p.add_argument("--force", action="store_true",
                    help="proceed even if beamngpy doesn't match the detected game version")
     return p.parse_args()
@@ -359,7 +375,9 @@ def main():
                         f"Or pass --force to proceed anyway.")
 
     speeds = [int(s.strip()) for s in args.speeds.split(",") if s.strip()]
-    table, path = run_calibration(cfg, args.car, speeds, args.reps, port=args.port)
+    grips = [round(float(g.strip()), 3) for g in args.grips.split(",") if g.strip()]
+    table, path = run_calibration(cfg, args.car, speeds, args.reps, grips=grips,
+                                  port=args.port, lead_seconds=args.grip_lead)
 
     print("\n--- CALIBRATION ---")
     for key in sorted(table.rows):

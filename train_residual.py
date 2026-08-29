@@ -39,7 +39,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack, VecNorm
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from residual_core import parse_speeds, parse_pedal_spec
+from residual_core import parse_speeds, parse_pedal_spec, parse_grip_spec
 from residual_log import setup_logging
 from sim_config import (
     SimConfig, load as load_sim_config, validate as validate_sim_config,
@@ -231,12 +231,24 @@ def make_venv(args):
             f"no calibration table was found at {calib_path!r}.\n\n"
             f'Run: python reference_runner.py --car <car> --speeds "60"')
 
+    grip_spec = parse_grip_spec(args.grip)
+    if spec.normalize and grip_spec is not None and grip_spec.needs_continuous_calibration:
+        raise SystemExit(
+            f"--grip {args.grip!r} draws continuously, so an episode can land on a "
+            f"grip level nothing was calibrated at, and --reward normalized would "
+            f"refuse mid-run.\n\n"
+            f'Use a list of levels instead (e.g. --grip "0.5,0.75,1.0") and '
+            f"calibrate each, or train with --reward v5.0.")
+    log.info("grip: %s", "stock (untouched)" if grip_spec is None else grip_spec)
+
     def _make():
         pedal = parse_pedal_spec(args.pedal)
         env = ABSLearningEnvResidual(port=args.port, env_index=0,
                                      sim_config=cfg, vehicle_pc=args.vehicle_pc,
                                      pedal_range=pedal, reward_spec=spec,
-                                     calibration_table=table)
+                                     calibration_table=table,
+                                     grip_spec=grip_spec,
+                                     grip_lead_seconds=args.grip_lead)
         env.fixed_mph = parse_speeds(args.speeds)
         return env
 
@@ -354,6 +366,14 @@ def parse_args():
     p.add_argument("--map", default=None)
     p.add_argument("--cpu-pinning", action="store_true",
                    help="pin Python/BeamNG to specific CPU cores (off by default)")
+    p.add_argument("--grip", default="off",
+                   help='tire grip: "off"/"stock" (never touched), a level like '
+                        '"0.6", a list "0.5,0.75,1.0" (randomized among them), or '
+                        'a range "0.4-1.0" (continuous random; incompatible with '
+                        '--reward normalized)')
+    p.add_argument("--grip-lead", type=float, default=0.0,
+                   help="apply the grip change this many seconds BEFORE brake "
+                        "onset (0 = same physics tick, exact)")
     p.add_argument("--reward", choices=sorted(PRESETS), default="v5.0",
                    help="reward preset: v5.0 (frozen default, absolute anchors) or "
                         "normalized (anchors on measured slam/stock references)")

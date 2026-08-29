@@ -140,6 +140,49 @@ def resolve_refs(spec, table, speed_mph, grip, radius_m):
                                       radius_m=radius_m))
 
 
+class GripArmInjector:
+    """Arms the tire-grip change inside the parent's monolithic reset().
+
+    There is no hook between the parent's `extensions.load('abstelemetry')`
+    and its `armBrakeSlam(...)`, and the teleport earlier in that same reset
+    reloads the vehicle Lua extension (so anything armed beforehand is lost).
+    This wraps queue_lua_command for the duration of reset() and injects the
+    grip arm immediately AFTER the slam arm passes through.
+
+    Injecting after is safe: armBrakeSlam only sets the target speed: the slam
+    FIRES later, on the physics tick where the coast-down crosses it. Lua
+    commands execute in queue order, so the grip is armed before that tick.
+    """
+
+    def __init__(self, vehicle, grip, lead_seconds=0.0):
+        self.vehicle = vehicle
+        self.grip = grip
+        self.lead_seconds = lead_seconds
+        self.armed = False
+        self._original = None
+
+    def __enter__(self):
+        if self.grip is None:
+            return self
+        self._original = self.vehicle.queue_lua_command
+
+        def wrapped(cmd):
+            self._original(cmd)
+            if not self.armed and "armBrakeSlam" in cmd:
+                self._original(
+                    f"extensions.abstelemetry.armGripChange("
+                    f"{self.grip}, {self.lead_seconds})")
+                self.armed = True
+
+        self.vehicle.queue_lua_command = wrapped
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._original is not None:
+            self.vehicle.queue_lua_command = self._original
+        return False
+
+
 def _maybe_override_vehicle_pc(vehicle_pc):
     """Set BEFORE super().__init__(): abs_env_incar.py reads its own module
     global VEHICLE_PC_INCAR (not a constructor parameter) when forcing the
@@ -158,7 +201,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
 
     def __init__(self, *args, sim_config=None, vehicle_pc=None, pedal_range=None,
                  reward_spec=None, calibration_table=None, grip=1.0,
-                 radius_m=None, **kwargs):
+                 radius_m=None, grip_spec=None, grip_lead_seconds=0.0, **kwargs):
         # self._sim_config must exist before super().__init__() runs -- the
         # parent's __init__ calls self._apply_performance_tuning(...) (our
         # override below) partway through its own body.
@@ -170,6 +213,11 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         self._calibration = calibration_table
         self.grip = grip
         self.radius_m = radius_m
+        # None => "stock": grip is never touched, and _draw_grip returns 1.0 so
+        # the calibration key still says grip=1.000 (which is what stock IS).
+        self._grip_spec = grip_spec
+        self.grip_lead_seconds = grip_lead_seconds
+        self._pending_grip = None
         install_reward_spec(self._reward_spec, self._current_refs)
         log.info("reward spec: %s (hash=%s, normalize=%s, default=%s)",
                  self._reward_spec.name, self._reward_spec.hash(),
@@ -224,6 +272,18 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         lo, hi = self.pedal_range
         return round(random.uniform(lo, hi), 3)
 
+    def _draw_grip(self):
+        """Returns the multiplier for this episode. With no spec (stock) the
+        value is 1.0 AND nothing is armed -- "don't touch grip at all" is
+        different from "explicitly set grip to 1.0", even though both describe
+        the same physics, because only the latter writes to the tire nodes."""
+        if self._grip_spec is None:
+            self._pending_grip = None
+            return 1.0
+        value = self._grip_spec.draw()
+        self._pending_grip = value
+        return value
+
     def _append_pedal(self, obs):
         return np.concatenate([np.asarray(obs, dtype=np.float32),
                                [np.float32(self.episode_pedal)]])
@@ -248,14 +308,29 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
 
     def reset(self, seed=None):
         self.episode_pedal = self._draw_pedal()
+        # Tire grip is drawn per episode and applied AT BRAKE ONSET (see
+        # GripArmInjector): the acceleration and coast approach always run at
+        # stock grip, so a low-grip episode still reaches its target speed.
+        # `grip` stays 1.0 when no spec was given -- "stock", never touched.
+        self.grip = self._draw_grip()
         self._ring.clear()
         self._ep_rel_sum[:] = 0.0
         self._ep_rel_max[:] = 0.0
         t0 = time.monotonic()
-        log.info("reset: episode=%d pedal=%.3f speeds=%s",
-                 self.episode_count + 1, self.episode_pedal, self.fixed_mph)
+        log.info("reset: episode=%d pedal=%.3f grip=%s speeds=%s",
+                 self.episode_count + 1, self.episode_pedal,
+                 "stock" if self._grip_spec is None else f"{self.grip:.3f}",
+                 self.fixed_mph)
         try:
-            obs, info = super().reset(seed=seed)
+            with GripArmInjector(self.vehicle, self._pending_grip,
+                                 self.grip_lead_seconds) as inj:
+                obs, info = super().reset(seed=seed)
+            if self._pending_grip is not None and not inj.armed:
+                raise RuntimeError(
+                    "grip change was never armed during reset() -- the parent's "
+                    "armBrakeSlam call was not seen, so this episode would have "
+                    "run at stock grip while being logged as "
+                    f"grip={self.grip}. Refusing to continue.")
         except Exception as e:
             # The parent's two RuntimeErrors name the failed phase ("brake slam
             # never fired" vs "never engaged/exited warmup") and embed the

@@ -19,9 +19,8 @@ def test_check_supported_allows_the_implemented_case():
     check_supported(grip=1.0, radius_m=STRAIGHT)   # must not raise
 
 
-def test_check_supported_refuses_non_default_grip():
-    with pytest.raises(NotImplementedError):
-        check_supported(grip=0.5, radius_m=STRAIGHT)
+def test_check_supported_allows_grip_now_that_it_is_implemented():
+    check_supported(grip=0.5, radius_m=STRAIGHT)    # must not raise
 
 
 def test_check_supported_refuses_a_corner():

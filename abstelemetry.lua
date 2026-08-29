@@ -811,8 +811,108 @@ local function disarmBrakeSlam()
   electrics.values.tel_slam_fired = 0
 end
 
+-- =====================================================
+-- TIRE GRIP CONTROL
+-- Changes the TIRE's friction, not the ground surface: the same mechanism
+-- BeamNG's own tire-damage code uses (beamstate.lua:549-557) --
+-- obj:setNodeFrictionSlidingCoefs on each wheel's treadNodes. Applied evenly
+-- to every wheel (this is "different tires", not split-mu).
+--
+-- The multiplier is ALWAYS applied against v.data.nodes -- the untouched jbeam
+-- values -- never against the current coefficients, so repeated calls cannot
+-- compound and restoring is exactly applyGripMultiplier(1.0).
+--
+-- Timing: the change is armed and fires at brake onset, so the acceleration
+-- and coast-down approach always happen at stock grip (a low-grip approach
+-- would spin the wheels and never reach the target speed) and only the
+-- braking phase sees the new value.
+-- =====================================================
+local gripMultCurrent = 1.0
+local gripPendingMult = nil
+local gripLeadSeconds = 0
+local gripFired = false
+
+local function applyGripMultiplier(mult)
+  mult = mult or 1.0
+  local n = 0
+  if wheels and wheels.wheels and v and v.data and v.data.nodes then
+    for _, wheel in pairs(wheels.wheels) do
+      if wheel.treadNodes then
+        for _, nodecid in pairs(wheel.treadNodes) do
+          local nd = v.data.nodes[nodecid]
+          if nd and nd.frictionCoef then
+            obj:setNodeFrictionSlidingCoefs(
+              nodecid,
+              nd.frictionCoef * mult,
+              (nd.slidingFrictionCoef or nd.frictionCoef) * mult)
+            n = n + 1
+          end
+        end
+      end
+    end
+  end
+  gripMultCurrent = mult
+  electrics.values.tel_grip_mult = mult
+  electrics.values.tel_grip_nodes = n
+  return n
+end
+
+-- Immediate change (used by the reference runner, which has no brake-onset
+-- arming step of its own to hang this off).
+local function setGripMultiplier(mult)
+  gripPendingMult = nil
+  gripFired = false
+  electrics.values.tel_grip_armed = 0
+  return applyGripMultiplier(mult)
+end
+
+-- Deferred change: fires at the brake onset (same physics tick the slam
+-- latches), or leadSeconds earlier if asked. The lead is predicted from the
+-- current deceleration, so it is approximate; leadSeconds = 0 is exact.
+local function armGripChange(mult, leadSeconds)
+  gripPendingMult = mult
+  gripLeadSeconds = leadSeconds or 0
+  gripFired = false
+  electrics.values.tel_grip_armed = 1
+  electrics.values.tel_grip_fired = 0
+end
+
+local function restoreGrip()
+  gripPendingMult = nil
+  gripFired = false
+  electrics.values.tel_grip_armed = 0
+  electrics.values.tel_grip_fired = 0
+  return applyGripMultiplier(1.0)
+end
+
+local function updateArmedGrip()
+  if gripPendingMult == nil or gripFired or slamArmTarget == nil then return end
+  local trigger
+  if gripLeadSeconds <= 0 then
+    trigger = instSpeed <= slamArmTarget          -- same tick as the slam
+  else
+    local decel = instGy                          -- current decel, m/s^2
+    if decel > 0.05 then
+      trigger = ((instSpeed - slamArmTarget) / decel) <= gripLeadSeconds
+    else
+      trigger = instSpeed <= slamArmTarget        -- coasting flat: no useful lead
+    end
+  end
+  if trigger then
+    local n = applyGripMultiplier(gripPendingMult)
+    gripFired = true
+    electrics.values.tel_grip_fired = 1
+    electrics.values.tel_grip_fire_speed = instSpeed
+    print(string.format(
+      "=== TELEMETRY: tire grip x%.3f applied on %d nodes at %.4f m/s ===",
+      gripPendingMult, n, instSpeed))
+  end
+end
+
+
 local function updateArmedSlam()
   if slamArmTarget == nil then return end
+  updateArmedGrip()
   if not slamFired and instSpeed <= slamArmTarget then
     slamFired = true
     electrics.values.tel_slam_fired = 1
@@ -1227,6 +1327,9 @@ M.onReset = onReset
 M.setBrakes = setBrakes
 M.releaseBrakes = releaseBrakes
 M.setTargetSpeed = setTargetSpeed
+M.setGripMultiplier = setGripMultiplier   -- tire grip: immediate
+M.armGripChange     = armGripChange       -- tire grip: at brake onset
+M.restoreGrip       = restoreGrip         -- tire grip: back to stock
 M.armBrakeSlam = armBrakeSlam       -- (PPO_V2) 2kHz-exact brake onset
 M.disarmBrakeSlam = disarmBrakeSlam
 M.resetAccum = resetAccum
