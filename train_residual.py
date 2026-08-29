@@ -44,6 +44,7 @@ sys.path.insert(0, HERE)
 
 from residual_core import parse_speeds, parse_pedal_spec
 from residual_log import setup_logging
+from sim_config import SimConfig, load as load_sim_config, validate as validate_sim_config
 
 FRAME_STACK = 16
 HEARTBEAT_STEPS = 2000
@@ -140,18 +141,44 @@ class LogMirrorCallback(BaseCallback):
             fh.writelines(this_run)
 
 
+def build_sim_config(args):
+    """Load settings.json, then apply any CLI flags the caller actually
+    passed (None = "leave the loaded/default value alone")."""
+    cfg = load_sim_config(args.settings)
+    if args.game is not None:
+        cfg.game = args.game
+    if args.game_folder is not None:
+        cfg.game_folder = args.game_folder
+    if args.userpath is not None:
+        cfg.userpath = args.userpath
+    if args.windowed:
+        cfg.headless = False
+    if args.map is not None:
+        cfg.map = args.map
+    if args.cpu_pinning:
+        cfg.cpu_pinning = True
+    return cfg
+
+
 def make_venv(args):
     from abs_env_residual import ABSLearningEnvResidual
 
+    cfg = build_sim_config(args)
+    problems = validate_sim_config(cfg)
+    if problems:
+        log.warning("sim_config has %d issue(s), proceeding anyway: %s",
+                   len(problems), problems)
+
     def _make():
         pedal = parse_pedal_spec(args.pedal)
-        env = ABSLearningEnvResidual(port=args.port, env_index=0, user_path=None,
-                                     pedal_range=pedal)
+        env = ABSLearningEnvResidual(port=args.port, env_index=0,
+                                     sim_config=cfg, pedal_range=pedal)
         env.fixed_mph = parse_speeds(args.speeds)
         return env
 
     t0 = time.monotonic()
-    log.info("creating env: port=%d speeds=%s pedal=%s", args.port, args.speeds, args.pedal)
+    log.info("creating env: port=%d speeds=%s pedal=%s game=%s headless=%s",
+             args.port, args.speeds, args.pedal, cfg.game, cfg.headless)
     venv = DummyVecEnv([_make])
     venv = VecFrameStack(venv, n_stack=FRAME_STACK)
     venv = VecNormalize(venv, norm_obs=True, norm_reward=False)
@@ -246,6 +273,19 @@ def parse_args():
     p.add_argument("--run-name", required=True)
     p.add_argument("--resume", default=None)
     p.add_argument("--stop-file", default=os.path.join(HERE, "STOP_TRAINING.txt"))
+    # simulator config -- see sim_config.py; a settings.json (GUI-written or
+    # hand-edited) supplies defaults, these flags override individual fields
+    p.add_argument("--settings", default=os.path.join(HERE, "settings.json"))
+    p.add_argument("--game", choices=["tech", "drive"], default=None)
+    p.add_argument("--game-folder", default=None,
+                   help="BeamNG install root (contains BeamNG.<tech|drive>.exe)")
+    p.add_argument("--userpath", default=None,
+                   help="BeamNG userpath; default is the standard OS location for --game")
+    p.add_argument("--windowed", action="store_true",
+                   help="disable headless launch (BeamNG.tech only)")
+    p.add_argument("--map", default=None)
+    p.add_argument("--cpu-pinning", action="store_true",
+                   help="pin Python/BeamNG to specific CPU cores (off by default)")
     # shared
     p.add_argument("--lr", type=float, default=None)
     # SAC-only

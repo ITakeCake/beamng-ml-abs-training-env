@@ -12,6 +12,13 @@ sys.path.insert(0, HERE)
 
 from gui_cmd import build_cmd, validate_settings
 from residual_log import setup_logging, tail_lines
+from sim_config import (
+    SimConfig, load as load_sim_config, save as save_sim_config,
+    validate as validate_sim_config, find_exe, guess_version_from_folder,
+    default_userpath,
+)
+
+SETTINGS_PATH = os.path.join(HERE, "settings.json")
 
 log = setup_logging(os.path.join(HERE, "logs", "gui.log"), component="gui")
 
@@ -53,9 +60,18 @@ class ResidualTrainerGUI:
 
         pad = dict(padx=6, pady=4)
 
+        self.notebook = ttk.Notebook(root)
+        self.notebook.pack(fill="both", expand=True)
+        self.training_tab = ttk.Frame(self.notebook)
+        self.sim_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.training_tab, text="Training")
+        self.notebook.add(self.sim_tab, text="Simulator")
+
+        self._build_simulator_tab(pad)
+
         # Row 1: algo dropdown
-        row1 = ttk.Frame(root)
-        row1.grid(row=0, column=0, sticky="ew", **pad)
+        row1 = ttk.Frame(self.training_tab)
+        row1.pack(fill="x", **pad)
         ttk.Label(row1, text="Algorithm:").pack(side="left")
         self.algo_var = tk.StringVar(value="sac")
         algo_box = ttk.Combobox(row1, textvariable=self.algo_var, values=["sac", "ppo"],
@@ -63,21 +79,21 @@ class ResidualTrainerGUI:
         algo_box.pack(side="left", padx=6)
         algo_box.bind("<<ComboboxSelected>>", lambda e: self._swap_algo_panel())
 
-        self.algo_panel = ttk.Frame(root)
-        self.algo_panel.grid(row=1, column=0, sticky="ew", **pad)
+        self.algo_panel = ttk.Frame(self.training_tab)
+        self.algo_panel.pack(fill="x", **pad)
         self._swap_algo_panel()
 
         # Row 2: speeds + map label
-        row2 = ttk.Frame(root)
-        row2.grid(row=2, column=0, sticky="ew", **pad)
+        row2 = ttk.Frame(self.training_tab)
+        row2.pack(fill="x", **pad)
         ttk.Label(row2, text="Speeds (mph, comma-separated):").pack(side="left")
         self.speeds_var = tk.StringVar(value="60")
         ttk.Entry(row2, textvariable=self.speeds_var, width=20).pack(side="left", padx=6)
         ttk.Label(row2, text='Map: smallgrid ("Grid, Small, Pure")').pack(side="left", padx=12)
 
         # Row 3: pedal randomization
-        row3 = ttk.Frame(root)
-        row3.grid(row=3, column=0, sticky="ew", **pad)
+        row3 = ttk.Frame(self.training_tab)
+        row3.pack(fill="x", **pad)
         self.pedal_random_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(row3, text="Randomize pedal", variable=self.pedal_random_var,
                         command=self._toggle_pedal_entry).pack(side="left")
@@ -87,16 +103,16 @@ class ResidualTrainerGUI:
         self.pedal_entry.pack(side="left", padx=6)
 
         # Row 4: deferred/dummy switches
-        row4 = ttk.Frame(root)
-        row4.grid(row=4, column=0, sticky="ew", **pad)
+        row4 = ttk.Frame(self.training_tab)
+        row4.pack(fill="x", **pad)
         ttk.Checkbutton(row4, text="Turn angles (needs steering reward design)",
                         state="disabled").pack(side="left")
         ttk.Checkbutton(row4, text="Pedal patterns ramp/pump (V4)",
                         state="disabled").pack(side="left", padx=12)
 
         # Row 5: run name / resume / total steps
-        row5 = ttk.Frame(root)
-        row5.grid(row=5, column=0, sticky="ew", **pad)
+        row5 = ttk.Frame(self.training_tab)
+        row5.pack(fill="x", **pad)
         ttk.Label(row5, text="Run name:").pack(side="left")
         self.run_name_var = tk.StringVar(value="residual_run1")
         ttk.Entry(row5, textvariable=self.run_name_var, width=20).pack(side="left", padx=6)
@@ -109,8 +125,8 @@ class ResidualTrainerGUI:
         self.resume_label.pack(side="left", padx=6)
 
         # Row 6: start/stop/status
-        row6 = ttk.Frame(root)
-        row6.grid(row=6, column=0, sticky="ew", **pad)
+        row6 = ttk.Frame(self.training_tab)
+        row6.pack(fill="x", **pad)
         ttk.Button(row6, text="START", command=self.start).pack(side="left")
         ttk.Button(row6, text="GRACEFUL STOP", command=self.stop).pack(side="left", padx=6)
         self.status_var = tk.StringVar(value="idle")
@@ -118,11 +134,128 @@ class ResidualTrainerGUI:
 
         # Row 7: monitor
         row7 = ttk.LabelFrame(root, text="Monitor")
-        row7.grid(row=7, column=0, sticky="ew", **pad)
+        row7.pack(fill="x", **pad)
         self.monitor_var = tk.StringVar(value="episodes: -- | rolling-20 avg_g: -- | best avg_g: -- | last outcome: --")
         ttk.Label(row7, textvariable=self.monitor_var).pack(side="left", padx=6, pady=4)
 
         self.root.after(1000, self._poll_monitor)
+
+    def _build_simulator_tab(self, pad):
+        cfg = load_sim_config(SETTINGS_PATH)
+        t = self.sim_tab
+
+        row = ttk.Frame(t); row.pack(fill="x", **pad)
+        ttk.Label(row, text="Game:").pack(side="left")
+        self.sim_game_var = tk.StringVar(value=cfg.game)
+        for val, text in (("tech", "BeamNG.tech"), ("drive", "BeamNG.drive")):
+            ttk.Radiobutton(row, text=text, value=val, variable=self.sim_game_var,
+                           command=self._on_sim_game_changed).pack(side="left", padx=6)
+
+        row = ttk.Frame(t); row.pack(fill="x", **pad)
+        ttk.Label(row, text="Game folder:").pack(side="left")
+        self.sim_folder_var = tk.StringVar(value=cfg.game_folder)
+        ttk.Entry(row, textvariable=self.sim_folder_var, width=50).pack(side="left", padx=6)
+        ttk.Button(row, text="Browse...", command=self._pick_game_folder).pack(side="left")
+        self.sim_folder_status_var = tk.StringVar(value="")
+        ttk.Label(row, textvariable=self.sim_folder_status_var).pack(side="left", padx=8)
+
+        row = ttk.Frame(t); row.pack(fill="x", **pad)
+        ttk.Label(row, text="Userpath:").pack(side="left")
+        self.sim_userpath_var = tk.StringVar(value=cfg.userpath)
+        ttk.Entry(row, textvariable=self.sim_userpath_var, width=50).pack(side="left", padx=6)
+        ttk.Button(row, text="Browse...", command=self._pick_userpath).pack(side="left")
+        ttk.Button(row, text="Auto", command=self._auto_userpath).pack(side="left", padx=4)
+
+        row = ttk.Frame(t); row.pack(fill="x", **pad)
+        self.sim_headless_var = tk.BooleanVar(value=cfg.headless)
+        self.sim_headless_check = ttk.Checkbutton(
+            row, text="Headless (no window, no GPU rendering -- BeamNG.tech only)",
+            variable=self.sim_headless_var)
+        self.sim_headless_check.pack(side="left")
+
+        row = ttk.Frame(t); row.pack(fill="x", **pad)
+        ttk.Label(row, text="Port:").pack(side="left")
+        self.sim_port_var = tk.StringVar(value=str(cfg.port))
+        ttk.Entry(row, textvariable=self.sim_port_var, width=8).pack(side="left", padx=6)
+        ttk.Label(row, text="Map:").pack(side="left", padx=(12, 0))
+        self.sim_map_var = tk.StringVar(value=cfg.map)
+        ttk.Entry(row, textvariable=self.sim_map_var, width=16).pack(side="left", padx=6)
+
+        row = ttk.Frame(t); row.pack(fill="x", **pad)
+        self.sim_cpu_pinning_var = tk.BooleanVar(value=cfg.cpu_pinning)
+        ttk.Checkbutton(row, text="Pin CPU cores (advanced; off by default)",
+                       variable=self.sim_cpu_pinning_var).pack(side="left")
+
+        row = ttk.Frame(t); row.pack(fill="x", **pad)
+        ttk.Button(row, text="Save Simulator Settings",
+                  command=self._save_sim_settings).pack(side="left")
+        self.sim_status_var = tk.StringVar(value="")
+        ttk.Label(row, textvariable=self.sim_status_var).pack(side="left", padx=8)
+
+        self._on_sim_game_changed()
+        self._refresh_sim_folder_status()
+
+    def _on_sim_game_changed(self):
+        # .drive has no -gfx null; headless only makes sense for .tech.
+        if self.sim_game_var.get() == "drive":
+            self.sim_headless_var.set(False)
+            self.sim_headless_check.configure(state="disabled")
+        else:
+            self.sim_headless_check.configure(state="normal")
+        self._refresh_sim_folder_status()
+
+    def _refresh_sim_folder_status(self):
+        folder = self.sim_folder_var.get()
+        game = self.sim_game_var.get()
+        exe = find_exe(folder, game) if folder else None
+        if not folder:
+            self.sim_folder_status_var.set("")
+        elif exe:
+            ver = guess_version_from_folder(folder)
+            self.sim_folder_status_var.set(f"found (version: {ver or 'unknown'})")
+        else:
+            self.sim_folder_status_var.set("EXE NOT FOUND for this game")
+
+    def _pick_game_folder(self):
+        path = filedialog.askdirectory(title="BeamNG install folder")
+        if path:
+            self.sim_folder_var.set(path)
+            self._refresh_sim_folder_status()
+
+    def _pick_userpath(self):
+        path = filedialog.askdirectory(title="BeamNG userpath")
+        if path:
+            self.sim_userpath_var.set(path)
+
+    def _auto_userpath(self):
+        self.sim_userpath_var.set(default_userpath(self.sim_game_var.get()))
+
+    def _collect_sim_config(self):
+        try:
+            port = int(self.sim_port_var.get())
+        except ValueError:
+            port = SimConfig().port
+        return SimConfig(
+            game=self.sim_game_var.get(),
+            game_folder=self.sim_folder_var.get(),
+            userpath=self.sim_userpath_var.get(),
+            headless=self.sim_headless_var.get(),
+            port=port,
+            map=self.sim_map_var.get() or "smallgrid",
+            cpu_pinning=self.sim_cpu_pinning_var.get(),
+        )
+
+    def _save_sim_settings(self):
+        cfg = self._collect_sim_config()
+        problems = validate_sim_config(cfg)
+        save_sim_config(cfg, SETTINGS_PATH)
+        log.info("simulator settings saved: %s (problems=%s)", cfg, problems)
+        if problems:
+            self.sim_status_var.set("saved, with issues -- see below")
+            messagebox.showwarning("Simulator settings saved, with issues",
+                                   "\n".join(problems))
+        else:
+            self.sim_status_var.set(f"saved to {os.path.basename(SETTINGS_PATH)}")
 
     def _tk_exception(self, exc_type, exc, tb):
         log.error("tkinter callback exception: %s: %s", exc_type.__name__, exc,
@@ -184,6 +317,16 @@ class ResidualTrainerGUI:
             log.warning("START refused: invalid settings: %s", problems)
             messagebox.showerror("Invalid settings", "\n".join(problems))
             return
+
+        sim_cfg = self._collect_sim_config()
+        sim_problems = validate_sim_config(sim_cfg)
+        if sim_problems:
+            log.warning("START refused: invalid simulator settings: %s", sim_problems)
+            messagebox.showerror("Invalid simulator settings (Simulator tab)",
+                                 "\n".join(sim_problems))
+            self.notebook.select(self.sim_tab)
+            return
+        save_sim_config(sim_cfg, SETTINGS_PATH)  # train_residual.py reads this by default
 
         pid_path = os.path.join(self._run_dir(), "pid.txt")
         if os.path.exists(pid_path):

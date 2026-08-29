@@ -26,13 +26,16 @@ readability (so a game-side observer of the raw input pedal sees episode_pedal,
 not a misleading 1.0) but is inert for physics and is not required for engagement
 to hold once the parent's own reset() sequence has completed engagement.
 """
+import os
 import random
 import time
 import numpy as np
 import gymnasium as gym
+import abs_env
 from abs_env_incar import ABSLearningEnvIncar, MAX_EPISODE_STEPS
 from residual_core import residual_to_brakes
 from residual_log import get_logger, StepRingBuffer
+from sim_config import SimConfig, resolved_userpath
 
 PEDAL_OBS_INDEX = 27
 OBS_DIM = 28
@@ -41,13 +44,59 @@ STEP_RING_CAPACITY = 50   # per-step detail kept in memory, dumped only on bad e
 log = get_logger("env")
 
 
+def _resolve_launch_kwargs(cfg, kwargs):
+    """Pure function (no game imports needed to call it, only to use the
+    result): what to override on the abs_env module + what kwargs to hand to
+    super().__init__(), given a SimConfig. Kept separate from __init__ so it's
+    unit-testable without a live game connection.
+
+    Reference-machine defaults are preserved when a field isn't explicitly
+    set: bng_home is only overridden when cfg.game_folder is non-empty (an
+    empty string would break BeamNGpy), so a caller who never touches the
+    Simulator tab still launches exactly as abs_env.BNG_HOME says."""
+    kwargs = dict(kwargs)
+    kwargs.setdefault("port", cfg.port)
+    if cfg.game_folder:
+        kwargs.setdefault("bng_home", cfg.game_folder)
+    kwargs.setdefault("user_path", resolved_userpath(cfg))
+    return cfg.headless, cfg.map, kwargs
+
+
+def _resolve_cpu_cores(cfg, total_cores):
+    """None = pinning disabled (the new default -- see sim_config.py).
+    Explicit beamng_cores wins; otherwise every core not claimed by Python."""
+    if not cfg.cpu_pinning:
+        return None
+    py_cores = list(cfg.python_cores)
+    bng_cores = (list(cfg.beamng_cores) if cfg.beamng_cores
+                else [c for c in range(total_cores) if c not in py_cores])
+    return py_cores, bng_cores
+
+
 class ABSLearningEnvResidual(ABSLearningEnvIncar):
     """In-car env with residual (release-from-pedal) action space. Action is
     [front_release, rear_release] in [0,1]; the episode's driver pedal position
     (constant per episode, optionally randomized) is appended to the parent's
     27-dim published obs as channel 28."""
 
-    def __init__(self, *args, pedal_range=None, **kwargs):
+    def __init__(self, *args, sim_config=None, pedal_range=None, **kwargs):
+        # self._sim_config must exist before super().__init__() runs -- the
+        # parent's __init__ calls self._apply_performance_tuning(...) (our
+        # override below) partway through its own body.
+        self._sim_config = sim_config or SimConfig()
+        if sim_config is not None:
+            headless, map_name, kwargs = _resolve_launch_kwargs(sim_config, kwargs)
+            # HEADLESS/MAP_NAME are read as module globals inside abs_env's
+            # __init__ body, not passed as parameters -- same seam
+            # abs_env_incar.py already uses for VEHICLE_PC. Only touched when
+            # sim_config is explicitly given, so an existing caller that never
+            # passes one launches exactly as before.
+            abs_env.HEADLESS = headless
+            abs_env.MAP_NAME = map_name
+            log.info("sim_config: game=%s headless=%s map=%s port=%s "
+                     "user_path=%s cpu_pinning=%s", sim_config.game, headless,
+                     map_name, kwargs.get("port"), kwargs.get("user_path"),
+                     sim_config.cpu_pinning)
         super().__init__(*args, **kwargs)
         self.pedal_range = pedal_range          # None => constant 1.0
         self.episode_pedal = 1.0
@@ -62,6 +111,19 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         log.info("env ready: port=%s obs_dim=%d action=%s pedal_range=%s fixed_mph=%s",
                  getattr(self, "port", "?"), OBS_DIM, self.action_space.shape,
                  pedal_range, getattr(self, "fixed_mph", None))
+
+    def _apply_performance_tuning(self, python_cores, beamng_cores):
+        """Override, not an edit to the protected abs_env.py: that file calls
+        this unconditionally with its own hardcoded core lists. CPU pinning is
+        opt-in now (sim_config.cpu_pinning, default False) -- a config tuned
+        for one specific CPU has no business running unasked on someone else's
+        machine, and it was already a silent no-op here anyway (psutil isn't
+        in this project's venv)."""
+        cores = _resolve_cpu_cores(self._sim_config, os.cpu_count() or 16)
+        if cores is None:
+            log.info("cpu pinning disabled (sim_config.cpu_pinning=False)")
+            return
+        super()._apply_performance_tuning(*cores)
 
     def _draw_pedal(self):
         if self.pedal_range is None:
