@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+runs/
+logs/
+cache/
+settings.json
+STOP_TRAINING.txt
+*.log
