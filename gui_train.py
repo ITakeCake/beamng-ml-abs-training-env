@@ -42,14 +42,16 @@ log.info("=== gui start: pid=%d python=%s beamngpy=%s",
 TRAIN_LOG_TAIL = 20   # lines of the run's train.log shown when the trainer dies
 
 SAC_DEFAULTS = dict(lr=1e-4, buffer_size=100_000, tau=0.005,
-                    target_entropy=-2.0, learning_starts=5_000)
+                    target_entropy=-2.0, learning_starts=5_000, train_freq=2)
 PPO_DEFAULTS = dict(lr=1e-4, n_steps=2048, batch_size=512, n_epochs=10,
-                    clip_range=0.2, gae_lambda=0.95)
+                    clip_range=0.2, gae_lambda=0.95, ent_coef=0.005)
 
 SAC_LABELS = dict(lr="learning rate", buffer_size="buffer size", tau="tau",
-                  target_entropy="target entropy", learning_starts="learning starts")
+                  target_entropy="target entropy", learning_starts="learning starts",
+                  train_freq="train freq (steps)")
 PPO_LABELS = dict(lr="learning rate", n_steps="n steps", batch_size="batch size",
-                  n_epochs="n epochs", clip_range="clip range", gae_lambda="GAE lambda")
+                  n_epochs="n epochs", clip_range="clip range", gae_lambda="GAE lambda",
+                  ent_coef="entropy coef")
 
 
 class ResidualTrainerGUI:

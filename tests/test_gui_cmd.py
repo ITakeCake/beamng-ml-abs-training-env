@@ -5,8 +5,8 @@ from gui_cmd import build_cmd, validate_settings
 BASE = dict(algo="sac", speeds="60,120", pedal_random=True, pedal_spec="0.4-1.0",
             total_steps=200000, run_name="r1", resume="",
             lr=1e-4, buffer_size=300000, tau=0.005, target_entropy=-2.0,
-            learning_starts=5000, n_steps=2048, batch_size=256, n_epochs=10,
-            clip_range=0.2, gae_lambda=0.95)
+            learning_starts=5000, train_freq=2, n_steps=2048, batch_size=256,
+            n_epochs=10, clip_range=0.2, gae_lambda=0.95, ent_coef=0.005)
 
 def test_sac_cmd_has_sac_flags_not_ppo():
     cmd = build_cmd(BASE)

@@ -8,8 +8,8 @@ from residual_core import parse_speeds, parse_pedal_spec
 PYTHON = sys.executable
 
 # per-algo flags: dict key -> CLI flag (underscores become dashes)
-SAC_KEYS = ["lr", "buffer_size", "tau", "target_entropy", "learning_starts"]
-PPO_KEYS = ["lr", "n_steps", "batch_size", "n_epochs", "clip_range", "gae_lambda"]
+SAC_KEYS = ["lr", "buffer_size", "tau", "target_entropy", "learning_starts", "train_freq"]
+PPO_KEYS = ["lr", "n_steps", "batch_size", "n_epochs", "clip_range", "gae_lambda", "ent_coef"]
 
 
 def build_cmd(settings):

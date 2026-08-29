@@ -35,6 +35,7 @@ if _installed_version != REQUIRED_BEAMNGPY_VERSION:
         f"A version mismatch fails the connection handshake outright -- fix the "
         f"environment before training, do not bypass this check.")
 
+import torch as th
 from stable_baselines3 import SAC, PPO
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack, VecNormalize
@@ -57,9 +58,29 @@ log = None   # set in main() once the run dir (and therefore the log path) is kn
 # updates proved crash-heavy at the higher rate. Residual v1 inherits the
 # already-tuned values rather than the plan's untuned first guesses.
 SAC_DEFAULTS = dict(lr=1e-4, buffer_size=100_000, tau=0.005,
-                    target_entropy=-2.0, learning_starts=5_000)
+                    target_entropy=-2.0, learning_starts=5_000, train_freq=2)
 PPO_DEFAULTS = dict(lr=1e-4, n_steps=2048, batch_size=512, n_epochs=10,
-                    clip_range=0.2, gae_lambda=0.95)
+                    clip_range=0.2, gae_lambda=0.95, ent_coef=0.005)
+
+# net_arch/activation match the reference trainers exactly (train.py's
+# policy_kwargs for SAC, train_ppo_axle.py's for PPO) -- SB3's own defaults
+# (64x64 tanh for PPO, 256x256 relu for SAC) are NOT these, and silently
+# training on the wrong network makes every result incomparable to the
+# reference runs this project's numbers are judged against.
+POLICY_KWARGS_SAC = dict(activation_fn=th.nn.ReLU,
+                         net_arch=dict(pi=[256, 256, 256], qf=[256, 256, 256]))
+POLICY_KWARGS_PPO = dict(activation_fn=th.nn.ReLU,
+                         net_arch=dict(pi=[256, 256, 256], vf=[256, 256, 256]))
+
+
+def resolve_device(requested):
+    """None = auto (cuda if available, else cpu) -- picks whatever GPU index
+    0 is on this machine. An explicit "cuda:1"-style request always wins;
+    there is no reference-machine-specific default here (that lived in the
+    single-machine prototype, tuned to keep one particular GPU free)."""
+    if requested:
+        return requested
+    return "cuda" if th.cuda.is_available() else "cpu"
 
 
 class StopFileCallback(BaseCallback):
@@ -218,15 +239,19 @@ def log_resolved_hyperparams(model, args):
 
 
 def build_model(args, venv):
+    device = resolve_device(args.device)
     if args.algo == "sac":
         return SAC("MlpPolicy", venv, learning_rate=args.lr,
                    buffer_size=args.buffer_size, tau=args.tau,
                    learning_starts=args.learning_starts,
-                   target_entropy=args.target_entropy, verbose=1, device="cuda")
+                   target_entropy=args.target_entropy,
+                   train_freq=(args.train_freq, "step"), gradient_steps=1,
+                   policy_kwargs=POLICY_KWARGS_SAC, verbose=1, device=device)
     return PPO("MlpPolicy", venv, learning_rate=args.lr, n_steps=args.n_steps,
                batch_size=args.batch_size, n_epochs=args.n_epochs,
                clip_range=args.clip_range, gae_lambda=args.gae_lambda,
-               verbose=1, device="cuda")
+               ent_coef=args.ent_coef, policy_kwargs=POLICY_KWARGS_PPO,
+               verbose=1, device=device)
 
 
 def load_resume(args, venv):
@@ -234,7 +259,7 @@ def load_resume(args, venv):
     of letting SB3 fail deep inside the first predict() call."""
     algo_cls = SAC if args.algo == "sac" else PPO
     log.info("resume: loading %s", args.resume)
-    model = algo_cls.load(args.resume, env=venv, device="cuda")
+    model = algo_cls.load(args.resume, env=venv, device=resolve_device(args.device))
     log.info("resume: checkpoint obs=%s env obs=%s num_timesteps=%s",
              model.observation_space.shape, venv.observation_space.shape,
              f"{model.num_timesteps:,}")
@@ -292,17 +317,22 @@ def parse_args():
                         "(default: the reference Machine-Trainer-Boy-V2-MLABS.pc)")
     # shared
     p.add_argument("--lr", type=float, default=None)
+    p.add_argument("--device", default=None,
+                   help='e.g. "cuda", "cuda:1", "cpu" (default: cuda if available, else cpu)')
     # SAC-only
     p.add_argument("--buffer-size", type=int, default=SAC_DEFAULTS["buffer_size"])
     p.add_argument("--tau", type=float, default=SAC_DEFAULTS["tau"])
     p.add_argument("--target-entropy", type=float, default=SAC_DEFAULTS["target_entropy"])
     p.add_argument("--learning-starts", type=int, default=SAC_DEFAULTS["learning_starts"])
+    p.add_argument("--train-freq", type=int, default=SAC_DEFAULTS["train_freq"],
+                   help="collect this many steps between gradient updates")
     # PPO-only
     p.add_argument("--n-steps", type=int, default=PPO_DEFAULTS["n_steps"])
     p.add_argument("--batch-size", type=int, default=PPO_DEFAULTS["batch_size"])
     p.add_argument("--n-epochs", type=int, default=PPO_DEFAULTS["n_epochs"])
     p.add_argument("--clip-range", type=float, default=PPO_DEFAULTS["clip_range"])
     p.add_argument("--gae-lambda", type=float, default=PPO_DEFAULTS["gae_lambda"])
+    p.add_argument("--ent-coef", type=float, default=PPO_DEFAULTS["ent_coef"])
     args = p.parse_args()
     if args.lr is None:
         args.lr = SAC_DEFAULTS["lr"] if args.algo == "sac" else PPO_DEFAULTS["lr"]
