@@ -17,6 +17,12 @@ from sim_config import (
     validate as validate_sim_config, find_exe, guess_version_from_folder,
     default_userpath,
 )
+from vehicle_scanner import (
+    scan_models, scan_trims, scan_custom_configs, resolve_part_config,
+    unique_model_labels, SUPPORTED_ML_ABS_MODELS,
+)
+
+CUSTOM_TRIM_LABEL = "Custom..."
 
 SETTINGS_PATH = os.path.join(HERE, "settings.json")
 
@@ -89,7 +95,9 @@ class ResidualTrainerGUI:
         ttk.Label(row2, text="Speeds (mph, comma-separated):").pack(side="left")
         self.speeds_var = tk.StringVar(value="60")
         ttk.Entry(row2, textvariable=self.speeds_var, width=20).pack(side="left", padx=6)
-        ttk.Label(row2, text='Map: smallgrid ("Grid, Small, Pure")').pack(side="left", padx=12)
+        ttk.Label(row2, text="(map is set in the Simulator tab)").pack(side="left", padx=12)
+
+        self._build_car_picker(pad)
 
         # Row 3: pedal randomization
         row3 = ttk.Frame(self.training_tab)
@@ -257,6 +265,123 @@ class ResidualTrainerGUI:
         else:
             self.sim_status_var.set(f"saved to {os.path.basename(SETTINGS_PATH)}")
 
+    # ---------------------------------------------------------- car picker
+    def _build_car_picker(self, pad):
+        row = ttk.Frame(self.training_tab); row.pack(fill="x", **pad)
+        ttk.Label(row, text="Model:").pack(side="left")
+        self.car_model_var = tk.StringVar(value="")
+        self.car_model_combo = ttk.Combobox(row, textvariable=self.car_model_var,
+                                            state="readonly", width=22)
+        self.car_model_combo.pack(side="left", padx=6)
+        self.car_model_combo.bind("<<ComboboxSelected>>",
+                                  lambda e: self._on_car_model_changed())
+
+        ttk.Label(row, text="Trim:").pack(side="left", padx=(12, 0))
+        self.car_trim_var = tk.StringVar(value="")
+        self.car_trim_combo = ttk.Combobox(row, textvariable=self.car_trim_var,
+                                           state="readonly", width=22)
+        self.car_trim_combo.pack(side="left", padx=6)
+        self.car_trim_combo.bind("<<ComboboxSelected>>",
+                                 lambda e: self._on_car_trim_changed())
+
+        ttk.Label(row, text="Custom:").pack(side="left", padx=(12, 0))
+        self.car_custom_var = tk.StringVar(value="")
+        self.car_custom_combo = ttk.Combobox(row, textvariable=self.car_custom_var,
+                                             state="disabled", width=22)
+        self.car_custom_combo.pack(side="left", padx=6)
+        self.car_custom_combo.bind("<<ComboboxSelected>>",
+                                   lambda e: self._update_resolved_car())
+
+        row_b = ttk.Frame(self.training_tab); row_b.pack(fill="x", **pad)
+        self.car_resolved_var = tk.StringVar(value="(select a model)")
+        ttk.Label(row_b, text="partConfig:").pack(side="left")
+        ttk.Label(row_b, textvariable=self.car_resolved_var).pack(side="left", padx=6)
+        self.car_warning_var = tk.StringVar(value="")
+        ttk.Label(row_b, textvariable=self.car_warning_var, foreground="#b8860b").pack(
+            side="left", padx=12)
+
+        self._car_model_by_display = {}
+        self._car_trim_by_display = {}
+        self._car_custom_by_display = {}
+        self.sim_folder_var.trace_add("write", lambda *a: self._refresh_car_models())
+        self._refresh_car_models()
+
+    def _refresh_car_models(self):
+        folder = self.sim_folder_var.get()
+        vehicles_dir = os.path.join(folder, "content", "vehicles") if folder else ""
+        if not folder or not os.path.isdir(vehicles_dir):
+            self.car_model_combo["values"] = []
+            self.car_model_var.set("")
+            self.car_resolved_var.set("(set Game folder in the Simulator tab)")
+            return
+        models = scan_models(vehicles_dir)
+        self._car_model_by_display = unique_model_labels(models)
+        self.car_model_combo["values"] = sorted(self._car_model_by_display)
+        if self.car_model_var.get() not in self._car_model_by_display and models:
+            self.car_model_var.set(sorted(self._car_model_by_display)[0])
+        self._on_car_model_changed()
+
+    def _on_car_model_changed(self):
+        model = self._car_model_by_display.get(self.car_model_var.get())
+        if model is None:
+            self.car_trim_combo["values"] = []
+            self.car_trim_var.set("")
+            self._update_resolved_car()
+            return
+        trims = scan_trims(model.zip_path, model.name)
+        self._car_trim_by_display = {t.display_name: t for t in trims}
+        values = sorted(self._car_trim_by_display) + [CUSTOM_TRIM_LABEL]
+        self.car_trim_combo["values"] = values
+        if self.car_trim_var.get() not in values:
+            self.car_trim_var.set(values[0])
+        self._on_car_trim_changed()
+
+    def _on_car_trim_changed(self):
+        model = self._car_model_by_display.get(self.car_model_var.get())
+        if self.car_trim_var.get() == CUSTOM_TRIM_LABEL and model is not None:
+            cfg = load_sim_config(SETTINGS_PATH)
+            userpath = cfg.userpath or default_userpath(cfg.game)
+            customs = scan_custom_configs(userpath, model.name)
+            self._car_custom_by_display = {c.display_name: c for c in customs}
+            self.car_custom_combo["values"] = sorted(self._car_custom_by_display)
+            self.car_custom_combo.configure(state="readonly" if customs else "disabled")
+            if customs and self.car_custom_var.get() not in self._car_custom_by_display:
+                self.car_custom_var.set(sorted(self._car_custom_by_display)[0])
+            if not customs:
+                self.car_custom_var.set("")
+        else:
+            self._car_custom_by_display = {}
+            self.car_custom_combo["values"] = []
+            self.car_custom_var.set("")
+            self.car_custom_combo.configure(state="disabled")
+        self._update_resolved_car()
+
+    def _update_resolved_car(self):
+        model = self._car_model_by_display.get(self.car_model_var.get())
+        if model is None:
+            self.car_resolved_var.set("(select a model)")
+            self.car_warning_var.set("")
+            self._resolved_vehicle_pc = None
+            return
+        if self.car_trim_var.get() == CUSTOM_TRIM_LABEL:
+            trim = self._car_custom_by_display.get(self.car_custom_var.get())
+        else:
+            trim = self._car_trim_by_display.get(self.car_trim_var.get())
+        if trim is None:
+            self.car_resolved_var.set("(no custom configs found for this model)"
+                                     if self.car_trim_var.get() == CUSTOM_TRIM_LABEL
+                                     else "(select a trim)")
+            self._resolved_vehicle_pc = None
+        else:
+            self._resolved_vehicle_pc = resolve_part_config(model.name, trim.pc_name)
+            self.car_resolved_var.set(self._resolved_vehicle_pc)
+        if model.name not in SUPPORTED_ML_ABS_MODELS:
+            self.car_warning_var.set(
+                f"No ML-ABS part ships for {model.name} yet -- only "
+                f"{', '.join(sorted(SUPPORTED_ML_ABS_MODELS))} is currently supported.")
+        else:
+            self.car_warning_var.set("")
+
     def _tk_exception(self, exc_type, exc, tb):
         log.error("tkinter callback exception: %s: %s", exc_type.__name__, exc,
                   exc_info=(exc_type, exc, tb))
@@ -294,6 +419,7 @@ class ResidualTrainerGUI:
             total_steps=self.total_steps_var.get(),
             run_name=self.run_name_var.get(),
             resume=self.resume_var.get(),
+            vehicle_pc=getattr(self, "_resolved_vehicle_pc", None),
         )
         for key, var in self.field_vars.items():
             settings[key] = var.get()

@@ -33,3 +33,9 @@ def test_validate_catches_bad_speeds_and_pedal():
     probs = validate_settings({**BASE, "speeds": "abc", "pedal_spec": "2.0"})
     assert len(probs) == 2
     assert validate_settings(BASE) == []
+
+
+def test_vehicle_pc_included_only_when_set():
+    assert "--vehicle-pc" not in " ".join(build_cmd(BASE))
+    s = " ".join(build_cmd({**BASE, "vehicle_pc": "vehicles/bx/MyCar.pc"}))
+    assert "--vehicle-pc vehicles/bx/MyCar.pc" in s

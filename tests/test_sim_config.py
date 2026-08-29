@@ -125,3 +125,23 @@ def test_resolve_cpu_cores_auto_fills_beamng_cores():
     py, bng = _resolve_cpu_cores(cfg, total_cores=4)
     assert py == [0, 1]
     assert bng == [2, 3]
+
+
+# --- vehicle_pc override seam (abs_env_residual.py) ---
+from abs_env_residual import _maybe_override_vehicle_pc
+import abs_env_incar
+
+
+def test_maybe_override_vehicle_pc_sets_module_global():
+    original = abs_env_incar.VEHICLE_PC_INCAR
+    try:
+        _maybe_override_vehicle_pc("vehicles/bx/custom.pc")
+        assert abs_env_incar.VEHICLE_PC_INCAR == "vehicles/bx/custom.pc"
+    finally:
+        abs_env_incar.VEHICLE_PC_INCAR = original
+
+
+def test_maybe_override_vehicle_pc_none_leaves_default_untouched():
+    original = abs_env_incar.VEHICLE_PC_INCAR
+    _maybe_override_vehicle_pc(None)
+    assert abs_env_incar.VEHICLE_PC_INCAR == original

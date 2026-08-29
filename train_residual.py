@@ -172,7 +172,8 @@ def make_venv(args):
     def _make():
         pedal = parse_pedal_spec(args.pedal)
         env = ABSLearningEnvResidual(port=args.port, env_index=0,
-                                     sim_config=cfg, pedal_range=pedal)
+                                     sim_config=cfg, vehicle_pc=args.vehicle_pc,
+                                     pedal_range=pedal)
         env.fixed_mph = parse_speeds(args.speeds)
         return env
 
@@ -286,6 +287,9 @@ def parse_args():
     p.add_argument("--map", default=None)
     p.add_argument("--cpu-pinning", action="store_true",
                    help="pin Python/BeamNG to specific CPU cores (off by default)")
+    p.add_argument("--vehicle-pc", default=None,
+                   help='partConfig string, e.g. "vehicles/etk800/MyCar.pc" '
+                        "(default: the reference Machine-Trainer-Boy-V2-MLABS.pc)")
     # shared
     p.add_argument("--lr", type=float, default=None)
     # SAC-only

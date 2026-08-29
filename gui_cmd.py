@@ -27,6 +27,9 @@ def build_cmd(settings):
     if settings.get("resume"):
         cmd += ["--resume", settings["resume"]]
 
+    if settings.get("vehicle_pc"):
+        cmd += ["--vehicle-pc", settings["vehicle_pc"]]
+
     return cmd
 
 

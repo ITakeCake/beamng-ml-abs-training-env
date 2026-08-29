@@ -32,6 +32,7 @@ import time
 import numpy as np
 import gymnasium as gym
 import abs_env
+import abs_env_incar
 from abs_env_incar import ABSLearningEnvIncar, MAX_EPISODE_STEPS
 from residual_core import residual_to_brakes
 from residual_log import get_logger, StepRingBuffer
@@ -73,13 +74,23 @@ def _resolve_cpu_cores(cfg, total_cores):
     return py_cores, bng_cores
 
 
+def _maybe_override_vehicle_pc(vehicle_pc):
+    """Set BEFORE super().__init__(): abs_env_incar.py reads its own module
+    global VEHICLE_PC_INCAR (not a constructor parameter) when forcing the
+    training car onto the ego vehicle. None leaves the reference-machine
+    default (Machine-Trainer-Boy-V2-MLABS.pc) untouched -- same seam pattern
+    as HEADLESS/MAP_NAME above, one module over."""
+    if vehicle_pc:
+        abs_env_incar.VEHICLE_PC_INCAR = vehicle_pc
+
+
 class ABSLearningEnvResidual(ABSLearningEnvIncar):
     """In-car env with residual (release-from-pedal) action space. Action is
     [front_release, rear_release] in [0,1]; the episode's driver pedal position
     (constant per episode, optionally randomized) is appended to the parent's
     27-dim published obs as channel 28."""
 
-    def __init__(self, *args, sim_config=None, pedal_range=None, **kwargs):
+    def __init__(self, *args, sim_config=None, vehicle_pc=None, pedal_range=None, **kwargs):
         # self._sim_config must exist before super().__init__() runs -- the
         # parent's __init__ calls self._apply_performance_tuning(...) (our
         # override below) partway through its own body.
@@ -97,6 +108,9 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
                      "user_path=%s cpu_pinning=%s", sim_config.game, headless,
                      map_name, kwargs.get("port"), kwargs.get("user_path"),
                      sim_config.cpu_pinning)
+        _maybe_override_vehicle_pc(vehicle_pc)
+        if vehicle_pc:
+            log.info("vehicle_pc override: %s", vehicle_pc)
         super().__init__(*args, **kwargs)
         self.pedal_range = pedal_range          # None => constant 1.0
         self.episode_pedal = 1.0
