@@ -37,6 +37,8 @@ from abs_env_incar import ABSLearningEnvIncar, MAX_EPISODE_STEPS
 from residual_core import residual_to_brakes
 from residual_log import get_logger, StepRingBuffer
 from sim_config import SimConfig, resolved_userpath
+from calibration import config_key
+from reward_spec import RewardSpec
 
 PEDAL_OBS_INDEX = 27
 OBS_DIM = 28
@@ -74,6 +76,70 @@ def _resolve_cpu_cores(cfg, total_cores):
     return py_cores, bng_cores
 
 
+# ---------------------------------------------------------------- reward spec
+# abs_env_incar binds every reward constant and _terminal_g_shape into its OWN
+# module namespace (`from abs_env import ...`) and reads them as globals inside
+# step(). Rebinding those names therefore redirects the parent's own reward
+# computation -- the same seam already used for HEADLESS / MAP_NAME /
+# VEHICLE_PC, and what makes duplicating ~150 lines of step() (with its drift
+# risk) unnecessary. abs_env itself is never touched.
+#
+# LIMITATION: these are module globals, so one spec applies per PROCESS, not
+# per env instance. Fine for this project (DummyVecEnv with a single env); a
+# multi-env setup with differing specs would need the duplication instead.
+_REWARD_NAMES = (
+    "PER_STEP_K", "PER_STEP_G_GATE", "YAW_BONUS_K_STEP", "YAW_BONUS_ALPHA",
+    "YAW_BONUS_K_TERMINAL", "YAW_BONUS_THRESHOLD", "YAW_PEN_K_TERMINAL",
+    "YAW_RATE_DEADZONE_RAD_S", "CRASH_PENALTY",
+)
+_SPEC_FIELD_FOR = {
+    "PER_STEP_K": "per_step_k",
+    "PER_STEP_G_GATE": "per_step_g_gate",
+    "YAW_BONUS_K_STEP": "yaw_bonus_k_step",
+    "YAW_BONUS_ALPHA": "yaw_bonus_alpha",
+    "YAW_BONUS_K_TERMINAL": "yaw_bonus_k_terminal",
+    "YAW_BONUS_THRESHOLD": "yaw_bonus_threshold",
+    "YAW_PEN_K_TERMINAL": "yaw_pen_k_terminal",
+    "YAW_RATE_DEADZONE_RAD_S": "yaw_rate_deadzone",
+    "CRASH_PENALTY": "crash_penalty",
+}
+
+
+def install_reward_spec(spec, refs_provider):
+    """Point abs_env_incar's reward globals at `spec`. `refs_provider` is
+    called at scoring time (not now) so a normalized spec picks up the
+    calibration references for whatever configuration the CURRENT episode is
+    running -- speeds vary per episode, so refs cannot be bound once."""
+    def shape(g):
+        return spec.g_shape(g, refs_provider())
+    abs_env_incar._terminal_g_shape = shape
+    for name in _REWARD_NAMES:
+        setattr(abs_env_incar, name, getattr(spec, _SPEC_FIELD_FOR[name]))
+
+
+def restore_reward_defaults():
+    """Put the protected file's own values back."""
+    abs_env_incar._terminal_g_shape = abs_env._terminal_g_shape
+    for name in _REWARD_NAMES:
+        setattr(abs_env_incar, name, getattr(abs_env, name))
+
+
+def resolve_refs(spec, table, speed_mph, grip, radius_m):
+    """(slam_g, stock_g) for the current configuration, or None when the spec
+    doesn't normalize. Raises rather than returning None for a normalized spec
+    with no matching row: training against absolute anchors is exactly the bug
+    normalization exists to fix."""
+    if not spec.normalize:
+        return None
+    if table is None:
+        raise KeyError(
+            "reward spec is normalized but no calibration table was loaded -- "
+            "run 'Calibrate baselines' for this car first (refusing to score "
+            "against absolute anchors).")
+    return table.references(config_key(grip=grip, speed_mph=speed_mph,
+                                      radius_m=radius_m))
+
+
 def _maybe_override_vehicle_pc(vehicle_pc):
     """Set BEFORE super().__init__(): abs_env_incar.py reads its own module
     global VEHICLE_PC_INCAR (not a constructor parameter) when forcing the
@@ -90,11 +156,24 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
     (constant per episode, optionally randomized) is appended to the parent's
     27-dim published obs as channel 28."""
 
-    def __init__(self, *args, sim_config=None, vehicle_pc=None, pedal_range=None, **kwargs):
+    def __init__(self, *args, sim_config=None, vehicle_pc=None, pedal_range=None,
+                 reward_spec=None, calibration_table=None, grip=1.0,
+                 radius_m=None, **kwargs):
         # self._sim_config must exist before super().__init__() runs -- the
         # parent's __init__ calls self._apply_performance_tuning(...) (our
         # override below) partway through its own body.
         self._sim_config = sim_config or SimConfig()
+
+        # Reward: default is the frozen v5.0 preset, which install_reward_spec
+        # proves (184 parity tests) leaves the parent's numbers bit-identical.
+        self._reward_spec = reward_spec or RewardSpec.v5()
+        self._calibration = calibration_table
+        self.grip = grip
+        self.radius_m = radius_m
+        install_reward_spec(self._reward_spec, self._current_refs)
+        log.info("reward spec: %s (hash=%s, normalize=%s, default=%s)",
+                 self._reward_spec.name, self._reward_spec.hash(),
+                 self._reward_spec.normalize, self._reward_spec.is_default())
         if sim_config is not None:
             headless, map_name, kwargs = _resolve_launch_kwargs(sim_config, kwargs)
             # HEADLESS/MAP_NAME are read as module globals inside abs_env's
@@ -148,6 +227,14 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
     def _append_pedal(self, obs):
         return np.concatenate([np.asarray(obs, dtype=np.float32),
                                [np.float32(self.episode_pedal)]])
+
+    def _current_refs(self):
+        """Calibration references for the episode currently running. Called at
+        scoring time, not bound once, because the target speed (and later grip
+        and radius) change per episode."""
+        return resolve_refs(self._reward_spec, self._calibration,
+                            getattr(self, "target_mph", None),
+                            self.grip, self.radius_m)
 
     def _outcome(self):
         """Derive the parent's terminal outcome (info is always {}): the parent

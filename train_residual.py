@@ -46,6 +46,8 @@ from sim_config import (
     detect_game_version,
 )
 from compat import check_compat
+from reward_spec import RewardSpec, PRESETS
+from calibration import CalibrationTable, table_hash
 
 FRAME_STACK = 16
 HEARTBEAT_STEPS = 2000
@@ -181,6 +183,21 @@ def build_sim_config(args):
     return cfg
 
 
+def load_calibration(args):
+    """(table, path). The car is taken from --vehicle-pc when given, else the
+    reference car's model, so the table lines up with what is being trained."""
+    car = args.calibration_car
+    if not car and args.vehicle_pc:
+        import re as _re
+        m = _re.match(r"vehicles/([^/]+)/", args.vehicle_pc)
+        car = m.group(1) if m else None
+    car = car or "etk800"
+    path = args.calibration or os.path.join(HERE, "calibration", f"{car}.json")
+    if not os.path.exists(path):
+        return None, path
+    return CalibrationTable.load(path), path
+
+
 def make_venv(args):
     from abs_env_residual import ABSLearningEnvResidual
 
@@ -203,11 +220,23 @@ def make_venv(args):
     elif compat.ok is not True:
         log.warning("proceeding despite compat check: %s", compat.message)
 
+    spec = PRESETS[args.reward]()
+    table, calib_path = load_calibration(args)
+    log.info("reward=%s hash=%s default=%s | calibration=%s hash=%s",
+             spec.name, spec.hash(), spec.is_default(),
+             calib_path or "(none)", table_hash(table) if table else "(none)")
+    if spec.normalize and table is None:
+        raise SystemExit(
+            f"--reward {args.reward} normalizes against measured references but "
+            f"no calibration table was found at {calib_path!r}.\n\n"
+            f'Run: python reference_runner.py --car <car> --speeds "60"')
+
     def _make():
         pedal = parse_pedal_spec(args.pedal)
         env = ABSLearningEnvResidual(port=args.port, env_index=0,
                                      sim_config=cfg, vehicle_pc=args.vehicle_pc,
-                                     pedal_range=pedal)
+                                     pedal_range=pedal, reward_spec=spec,
+                                     calibration_table=table)
         env.fixed_mph = parse_speeds(args.speeds)
         return env
 
@@ -325,6 +354,13 @@ def parse_args():
     p.add_argument("--map", default=None)
     p.add_argument("--cpu-pinning", action="store_true",
                    help="pin Python/BeamNG to specific CPU cores (off by default)")
+    p.add_argument("--reward", choices=sorted(PRESETS), default="v5.0",
+                   help="reward preset: v5.0 (frozen default, absolute anchors) or "
+                        "normalized (anchors on measured slam/stock references)")
+    p.add_argument("--calibration", default=None,
+                   help="path to a calibration table (default: calibration/<car>.json)")
+    p.add_argument("--calibration-car", default=None,
+                   help="car key for the calibration table (default: from --vehicle-pc)")
     p.add_argument("--force", action="store_true",
                    help="proceed even if beamngpy doesn't match the detected game version")
     p.add_argument("--vehicle-pc", default=None,
