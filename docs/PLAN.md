@@ -96,6 +96,34 @@ Before any long randomized-pedal run: slam at pedal 0.5 vs 1.0; g must drop well
 below the ~1.03 g floor. If it doesn't, the slam latch is beating the controller's
 `input.brake = maxBrake` write and pedal randomization is a no-op.
 
+## 8. Output tab: "ML ABS" part on every car + per-model sub-selector (verified feasible 2026-08-29)
+
+Investigated against the 0.37.6 jbeam + controller.lua. All standard mechanics:
+
+- **Per-car ABS slot names differ** (`etk800_ABS`, `bx_ABS`, `sbr_DSE_ABS`,
+  `sunburst2_DSE_ABS`, ...). 16 of 28 Car-type models have one; the generator emits
+  one jbeam per supported car (same pattern as the DynamicABS-E mod, which covers 20).
+  The 12 without any ABS slot (barstow, moonhawk, bolide, miramar, pigeon, nine,
+  bluebuck, burnside, autobello, wigeon, atv, utv) are listed as unsupported in v1 --
+  adding a slot means overriding a stock body/brakes part.
+- **Secondary selector = a child slot.** The "ML ABS" parent part declares a
+  `mlabs_model` slot; each exported model is a child part in it (precedent: brake
+  part -> "Front Brake Pads" sub-slot; n2o child part carries its own controller).
+  Selecting ML ABS in the parts menu shows the model dropdown underneath.
+- **One controller, many models.** controller.lua passes the jbeam row table to
+  `init(data)`, so a child part row `["MTB-ML-ABS", {"weights":"mlabs_w_<run>"}]`
+  selects its weights module. No controller copies per model (unlike the current
+  4-model machine_driven_abs mod).
+- **It is a mod**: writes `<userpath>/mods/unpacked/ml_abs/`; install folder untouched;
+  can target .drive and .tech userpaths independently.
+- **Limitation stated in the UI**: the controller is car-agnostic (4 wheels, geometric
+  wheel ordering), a model is not -- each model's display name carries its training
+  car/algo/steps/best-g; the dropdown shows all models on every car.
+
+Output tab: "Generate ML ABS for all cars" (skeleton + skipped list) · model table of
+finished runs with Export-to-game / Remove (runs export_policy_weights.py, writes
+weights + child part, resyncs the mod) · installed-to status for .drive / .tech.
+
 ## Build order
 
 1. Scaffold repo: copy ResidualABS + assets, requirements, README skeleton, tests green.
@@ -105,3 +133,4 @@ below the ~1.03 g floor. If it doesn't, the slam latch is beating the controller
 5. Trainer kwargs fix.
 6. Live smoke: .tech headless end-to-end, watch train.log; then the pedal probe.
 7. .drive smoke (or ship the toggle labeled untested).
+8. Output tab: generator + exporter + sub-slot mod layout.
