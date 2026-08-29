@@ -5,7 +5,7 @@ import json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sim_config import (
     SimConfig, default_userpath, find_exe, guess_version_from_folder,
-    validate, load, save, DEFAULTS,
+    validate, load, save, DEFAULTS, resolved_userpath,
 )
 
 
@@ -24,6 +24,16 @@ def test_default_userpath_drive_vs_tech():
     assert "BeamNG.tech" in p_tech
     assert "BeamNG.drive" in p_drive
     assert p_tech != p_drive
+
+
+def test_default_userpath_does_not_include_current():
+    # BeamNG.exe manages a "current" version-subfolder ITSELF under whatever
+    # -userpath it's given -- passing a path that already ends in "current"
+    # makes the game create/use <userpath>/current/current (confirmed live,
+    # 2026-08-29: game log showed "userpath = ...\current\current\" after
+    # launching with user=default_userpath("tech")).
+    assert not default_userpath("tech").rstrip("\\/").endswith("current")
+    assert not default_userpath("drive").rstrip("\\/").endswith("current")
 
 
 def test_find_exe_returns_none_for_missing_folder(tmp_path):
@@ -145,3 +155,27 @@ def test_maybe_override_vehicle_pc_none_leaves_default_untouched():
     original = abs_env_incar.VEHICLE_PC_INCAR
     _maybe_override_vehicle_pc(None)
     assert abs_env_incar.VEHICLE_PC_INCAR == original
+
+
+# --- content_userpath: the folder where vehicles/mods actually live, one
+# level under whatever base userpath the game is launched with ---
+from sim_config import content_userpath
+
+
+def test_content_userpath_appends_current_to_the_base():
+    cfg = SimConfig(userpath=r"C:\Games\BeamNG.tech")
+    assert content_userpath(cfg) == r"C:\Games\BeamNG.tech\current"
+
+
+def test_resolved_userpath_normalizes_a_path_the_user_already_pointed_at_current():
+    # Real-world mistake: users naturally browse to the *visible* folder
+    # (…\current), since that's the one with content in Explorer. Must not
+    # double-nest it at launch.
+    cfg = SimConfig(userpath=r"C:\Games\BeamNG.tech\current")
+    assert resolved_userpath(cfg) == r"C:\Games\BeamNG.tech"
+    assert content_userpath(cfg) == r"C:\Games\BeamNG.tech\current"
+
+
+def test_resolved_userpath_normalizes_trailing_slash_variants():
+    cfg = SimConfig(userpath=r"C:\Games\BeamNG.tech\current\\")
+    assert resolved_userpath(cfg) == r"C:\Games\BeamNG.tech"

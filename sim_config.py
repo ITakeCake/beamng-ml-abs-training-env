@@ -30,9 +30,19 @@ DEFAULTS = SimConfig()
 
 
 def default_userpath(game):
+    """The BASE userpath BeamNG.exe is launched with (its -userpath argument /
+    beamngpy's `user=`). BeamNG manages a "current" version-subfolder ITSELF
+    underneath this -- passing a path that already ends in "current" makes it
+    create/use <path>/current/current instead (confirmed live 2026-08-29: the
+    game's own log showed "userpath = ...\\current\\current\\" after a launch
+    with the old, over-appended default). The folder where vehicles/mods
+    actually live for reading/installing is this path's own "current"
+    subfolder -- see vehicle_scanner.py / asset_installer.py, which take an
+    already-resolved content folder as their argument, not this function's
+    return value directly."""
     root = os.path.join(os.environ.get("LOCALAPPDATA", ""), "BeamNG")
     name = "BeamNG.tech" if game == "tech" else "BeamNG.drive"
-    return os.path.join(root, name, "current")
+    return os.path.join(root, name)
 
 
 def find_exe(game_folder, game):
@@ -70,7 +80,23 @@ def validate(cfg):
 
 
 def resolved_userpath(cfg):
-    return cfg.userpath or default_userpath(cfg.game)
+    """The BASE path to hand BeamNG at launch (beamngpy's user=/-userpath).
+    Normalizes away a trailing "current" -- the natural real-world mistake is
+    browsing to the *visible* folder (…\\current, the one Explorer shows with
+    actual content in it) and pointing the Userpath field at that instead of
+    its parent, which would double-nest it (see default_userpath)."""
+    up = (cfg.userpath or default_userpath(cfg.game)).rstrip("\\/")
+    if os.path.basename(up) == "current":
+        up = os.path.dirname(up)
+    return up
+
+
+def content_userpath(cfg):
+    """Where vehicles/mods actually live for reading/installing -- BeamNG's
+    own "current" version-subfolder under the launch base. Use this, never
+    resolved_userpath(), for anything that scans or writes vehicle/mod files
+    (vehicle_scanner.py, asset_installer.py)."""
+    return os.path.join(resolved_userpath(cfg), "current")
 
 
 def save(cfg, path):

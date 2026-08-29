@@ -15,7 +15,7 @@ from residual_log import setup_logging, tail_lines
 from sim_config import (
     SimConfig, load as load_sim_config, save as save_sim_config,
     validate as validate_sim_config, find_exe, guess_version_from_folder,
-    default_userpath,
+    default_userpath, content_userpath,
 )
 from vehicle_scanner import (
     scan_models, scan_trims, scan_custom_configs, resolve_part_config,
@@ -231,7 +231,7 @@ class ResidualTrainerGUI:
         self.sim_compat_var.set(compat.message)
 
     def _check_asset_status(self):
-        userpath = self.sim_userpath_var.get() or default_userpath(self.sim_game_var.get())
+        userpath = content_userpath(self._collect_sim_config())
         status = asset_installer.installed_status(ASSETS_DIR, userpath)
         counts = {}
         for v in status.values():
@@ -241,7 +241,7 @@ class ResidualTrainerGUI:
             ", ".join(f"{v}: {n}" for v, n in sorted(counts.items())) or "no assets")
 
     def _install_assets(self):
-        userpath = self.sim_userpath_var.get() or default_userpath(self.sim_game_var.get())
+        userpath = content_userpath(self._collect_sim_config())
         report = asset_installer.install_assets(ASSETS_DIR, userpath)
         counts = {}
         for _path, action in report:
@@ -389,8 +389,7 @@ class ResidualTrainerGUI:
     def _on_car_trim_changed(self):
         model = self._car_model_by_display.get(self.car_model_var.get())
         if self.car_trim_var.get() == CUSTOM_TRIM_LABEL and model is not None:
-            cfg = load_sim_config(SETTINGS_PATH)
-            userpath = cfg.userpath or default_userpath(cfg.game)
+            userpath = content_userpath(self._collect_sim_config())
             customs = scan_custom_configs(userpath, model.name)
             self._car_custom_by_display = {c.display_name: c for c in customs}
             self.car_custom_combo["values"] = sorted(self._car_custom_by_display)
