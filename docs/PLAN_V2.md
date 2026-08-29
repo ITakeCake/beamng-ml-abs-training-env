@@ -19,6 +19,31 @@ The gatekeeper at 1.06 g is "beat the etk800 dry-asphalt slam floor (1.03 g) by
 stop (~0.35 g) scores -400. Adding an offset can't fix it; the anchors have to
 move per configuration.
 
+### MEASURED 2026-08-29 (etk800 Machine-Trainer-Boy V2, smallgrid, 60 mph, dry)
+
+| reference | arc avg_g (median of 3) | distance | v5.0 reward |
+|---|---|---|---|
+| slam / full lockup | **1.0315 g** | 33.0 m | **+966** |
+| stock ABS          | **1.1884 g** | 28.6 m | +5049 |
+| ResidualABS best gated result | 1.043 g | -- | +987 |
+
+Stock ABS beats lockup by **0.157 g / 4.4 m**, and is extremely repeatable
+(spread +-0.0008 g). Three things this proves about v5.0:
+
+1. The gatekeeper (1.06 g) -- the "exceptional performance" cliff -- sits
+   BELOW stock ABS (1.19 g), and only 0.03 g above plain lockup.
+2. **Locking the wheels scores +966.** The single behaviour ABS exists to
+   prevent earns a large positive reward.
+3. The best result the project has produced (1.043 g) scores +987: within 2%
+   of what locking the wheels scores. The reward cannot meaningfully
+   distinguish the two, which is exactly the brake-slammer local optimum the
+   residual action space was built to escape -- the reward was reinforcing it
+   from the other side the whole time.
+
+Re-anchored, the same three land at 0.000 (slam), 1.000 (stock) and 0.073 --
+i.e. the best result so far captured 7% of the margin stock ABS has over
+locked wheels. That is the honest picture the absolute shape was hiding.
+
 ## 1. The metric: arc-length avg_g, and why it's not "g vs distance"
 
 `avg_g = (v_start^2 - v_end^2) / (2 * distance * gravity)` -- stopping distance

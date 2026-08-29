@@ -8,3 +8,6 @@ cache/
 settings.json
 STOP_TRAINING.txt
 *.log
+
+# calibration is machine/install-specific measurement output
+# (committed deliberately for the reference car -- see calibration/etk800.json)
