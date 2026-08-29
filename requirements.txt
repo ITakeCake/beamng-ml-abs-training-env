@@ -1,0 +1,12 @@
+# Pinned to what the reference training environment runs on (2026-08-29).
+# beamngpy MUST match your BeamNG.tech/.drive install's wire protocol --
+# see https://github.com/BeamNG/BeamNGpy/blob/master/COMPATIBILITY.md
+beamngpy==1.34.1
+stable-baselines3==2.7.1
+gymnasium==1.2.3
+numpy==2.2.6
+torch==2.9.1
+psutil
+
+# dev/test only
+pytest

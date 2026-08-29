@@ -1,0 +1,8 @@
+{
+    "title":"MTB ML ABS",
+    "description":"ML-policy (SAC) ABS slot for the ETK800 wagon (Machine-Trainer-Boy). Loads MTB-ML-ABS controller + bundled abstelemetry actuation bridge.",
+    "version":"1.0.0",
+    "author":"Blake",
+    "category":"Vehicles / Parts",
+    "tags":["abs","ml","sac","etk800","mtb"]
+}

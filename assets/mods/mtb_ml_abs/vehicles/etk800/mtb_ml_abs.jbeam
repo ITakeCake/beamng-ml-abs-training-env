@@ -1,0 +1,18 @@
+{
+"etk_DSE_ABS_MTB_ML": {
+    "information":{
+        "authors":"Blake",
+        "name":"MTB ML ABS",
+        "value":250
+    },
+    "slotType":"etk_DSE_ABS",
+    "pressureWheels": [
+        ["name","hubGroup","group","node1:","node2:","nodeS","nodeArm:","wheelDir"],
+        {"enableABS":false}
+    ],
+    "controller": [
+        ["fileName"],
+        ["MTB-ML-ABS", {}]
+    ]
+}
+}
