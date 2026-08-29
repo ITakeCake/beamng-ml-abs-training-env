@@ -179,3 +179,28 @@ def test_resolved_userpath_normalizes_a_path_the_user_already_pointed_at_current
 def test_resolved_userpath_normalizes_trailing_slash_variants():
     cfg = SimConfig(userpath=r"C:\Games\BeamNG.tech\current\\")
     assert resolved_userpath(cfg) == r"C:\Games\BeamNG.tech"
+
+
+# --- detect_game_version: the ini file BeamNG itself maintains is a far more
+# reliable version source than guessing from the folder name (Steam installs
+# like BeamNG.drive commonly have no version in their folder name at all --
+# confirmed live 2026-08-29 against D:\SteamLibrary\...\BeamNG.drive) ---
+from sim_config import detect_game_version
+
+
+def test_detect_game_version_reads_the_ini_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    ini_dir = tmp_path / "BeamNG"
+    ini_dir.mkdir()
+    (ini_dir / "BeamNG.drive.ini").write_text("version = 0.39.4.0\ninstallPath = D:\\x\\\n")
+    assert detect_game_version("drive", game_folder=r"D:\SteamLibrary\BeamNG.drive") == "0.39.4.0"
+
+
+def test_detect_game_version_falls_back_to_folder_name_when_no_ini(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert detect_game_version("tech", game_folder=r"C:\x\BeamNG.tech.v0.37.6.0") == "0.37.6.0"
+
+
+def test_detect_game_version_none_when_neither_source_available(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert detect_game_version("drive", game_folder=r"D:\SteamLibrary\BeamNG.drive") is None

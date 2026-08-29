@@ -26,14 +26,10 @@ import time
 
 import beamngpy
 
-REQUIRED_BEAMNGPY_VERSION = "1.34.1"
+# Real per-target compat check (compat.py, against the ACTUAL game version
+# pointed at by --game-folder) happens in make_venv() below, not here -- a
+# fixed constant can't know which game a universal tool is running against.
 _installed_version = beamngpy.__version__.strip()
-if _installed_version != REQUIRED_BEAMNGPY_VERSION:
-    raise RuntimeError(
-        f"beamngpy {_installed_version!r} does not match the pinned "
-        f"{REQUIRED_BEAMNGPY_VERSION!r} this project's BeamNG.tech install speaks. "
-        f"A version mismatch fails the connection handshake outright -- fix the "
-        f"environment before training, do not bypass this check.")
 
 import torch as th
 from stable_baselines3 import SAC, PPO
@@ -45,7 +41,11 @@ sys.path.insert(0, HERE)
 
 from residual_core import parse_speeds, parse_pedal_spec
 from residual_log import setup_logging
-from sim_config import SimConfig, load as load_sim_config, validate as validate_sim_config
+from sim_config import (
+    SimConfig, load as load_sim_config, validate as validate_sim_config,
+    detect_game_version,
+)
+from compat import check_compat
 
 FRAME_STACK = 16
 HEARTBEAT_STEPS = 2000
@@ -190,6 +190,19 @@ def make_venv(args):
         log.warning("sim_config has %d issue(s), proceeding anyway: %s",
                    len(problems), problems)
 
+    game_version = detect_game_version(cfg.game, cfg.game_folder)
+    compat = check_compat(game_version, _installed_version)
+    log.info("compat check: game_version=%s beamngpy=%s ok=%s",
+             game_version, _installed_version, compat.ok)
+    if compat.ok is False and not args.force:
+        log.error("%s", compat.message)
+        raise SystemExit(
+            f"{compat.message}\n\nFix: {compat.fix_command}\n\n"
+            f"Or pass --force to proceed anyway (the connection will likely "
+            f"fail outright on a real protocol mismatch).")
+    elif compat.ok is not True:
+        log.warning("proceeding despite compat check: %s", compat.message)
+
     def _make():
         pedal = parse_pedal_spec(args.pedal)
         env = ABSLearningEnvResidual(port=args.port, env_index=0,
@@ -312,6 +325,8 @@ def parse_args():
     p.add_argument("--map", default=None)
     p.add_argument("--cpu-pinning", action="store_true",
                    help="pin Python/BeamNG to specific CPU cores (off by default)")
+    p.add_argument("--force", action="store_true",
+                   help="proceed even if beamngpy doesn't match the detected game version")
     p.add_argument("--vehicle-pc", default=None,
                    help='partConfig string, e.g. "vehicles/etk800/MyCar.pc" '
                         "(default: the reference Machine-Trainer-Boy-V2-MLABS.pc)")

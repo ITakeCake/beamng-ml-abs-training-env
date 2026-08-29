@@ -45,6 +45,30 @@ def default_userpath(game):
     return os.path.join(root, name)
 
 
+def _read_version_ini(game):
+    """BeamNG writes %LOCALAPPDATA%\\BeamNG\\BeamNG.<game>.ini itself on every
+    launch ("version = X.Y.Z.W") -- authoritative regardless of where or how
+    the game is installed. None if the game has never been launched yet."""
+    path = os.path.join(os.environ.get("LOCALAPPDATA", ""), "BeamNG", f"BeamNG.{game}.ini")
+    try:
+        with open(path, encoding="utf-8-sig") as fh:
+            for line in fh:
+                if line.strip().startswith("version"):
+                    return line.split("=", 1)[1].strip()
+    except OSError:
+        return None
+    return None
+
+
+def detect_game_version(game, game_folder):
+    """Best available game version: the ini file BeamNG itself writes (works
+    regardless of install location/naming -- e.g. Steam installs of
+    BeamNG.drive commonly encode no version in the folder name at all),
+    falling back to guessing from the folder name. None if neither source is
+    available (e.g. a fresh install that has never been launched)."""
+    return _read_version_ini(game) or guess_version_from_folder(game_folder)
+
+
 def find_exe(game_folder, game):
     if not game_folder or not os.path.isdir(game_folder):
         return None

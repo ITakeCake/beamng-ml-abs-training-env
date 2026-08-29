@@ -14,7 +14,7 @@ from gui_cmd import build_cmd, validate_settings
 from residual_log import setup_logging, tail_lines
 from sim_config import (
     SimConfig, load as load_sim_config, save as save_sim_config,
-    validate as validate_sim_config, find_exe, guess_version_from_folder,
+    validate as validate_sim_config, find_exe, detect_game_version,
     default_userpath, content_userpath,
 )
 from vehicle_scanner import (
@@ -226,7 +226,7 @@ class ResidualTrainerGUI:
         self._refresh_compat_status()
 
     def _refresh_compat_status(self):
-        game_version = guess_version_from_folder(self.sim_folder_var.get())
+        game_version = detect_game_version(self.sim_game_var.get(), self.sim_folder_var.get())
         compat = check_compat(game_version, _BNG_VER)
         self.sim_compat_var.set(compat.message)
 
@@ -269,7 +269,7 @@ class ResidualTrainerGUI:
         if not folder:
             self.sim_folder_status_var.set("")
         elif exe:
-            ver = guess_version_from_folder(folder)
+            ver = detect_game_version(game, folder)
             self.sim_folder_status_var.set(f"found (version: {ver or 'unknown'})")
         else:
             self.sim_folder_status_var.set("EXE NOT FOUND for this game")
@@ -496,7 +496,7 @@ class ResidualTrainerGUI:
             return
         save_sim_config(sim_cfg, SETTINGS_PATH)  # train_residual.py reads this by default
 
-        game_version = guess_version_from_folder(sim_cfg.game_folder)
+        game_version = detect_game_version(sim_cfg.game, sim_cfg.game_folder)
         compat = check_compat(game_version, _BNG_VER)
         log.info("compat check: game_version=%s beamngpy=%s ok=%s",
                  game_version, _BNG_VER, compat.ok)
