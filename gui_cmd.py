@@ -3,7 +3,8 @@ No game/GUI imports -- pure functions so the command builder is independently te
 
 import sys
 
-from residual_core import parse_speeds, parse_pedal_spec, parse_grip_spec
+from residual_core import (parse_speeds, parse_pedal_spec, parse_grip_spec,
+                           parse_net_arch)
 from corner import parse_corner_spec
 
 PYTHON = sys.executable
@@ -39,6 +40,8 @@ def build_cmd(settings):
         cmd += ["--grip", str(settings["grip"])]
     if settings.get("corner"):
         cmd += ["--corner", str(settings["corner"])]
+    if settings.get("net_arch"):
+        cmd += ["--net-arch", str(settings["net_arch"])]
 
     return cmd
 
@@ -103,6 +106,11 @@ def validate_settings(settings):
     if settings.get("corner"):
         try:
             parse_corner_spec(settings["corner"])
+        except ValueError as e:
+            problems.append(str(e))
+    if settings.get("net_arch"):
+        try:
+            parse_net_arch(settings["net_arch"])
         except ValueError as e:
             problems.append(str(e))
     return problems

@@ -97,6 +97,13 @@ class ResidualTrainerGUI:
         algo_box.bind("<<ComboboxSelected>>", lambda e: self._swap_algo_panel())
         gui_help.attach(algo_box, None, "algo")
 
+        ttk.Label(row1, text="Network:").pack(side="left", padx=(18, 0))
+        self.net_arch_var = tk.StringVar(value="3x256")
+        e = ttk.Entry(row1, textvariable=self.net_arch_var, width=16)
+        e.pack(side="left", padx=6)
+        gui_help.attach(e, None, "net_arch")
+        ttk.Label(row1, text='layers x width, or "512,256,128"').pack(side="left")
+
         self.algo_panel = ttk.Frame(self.training_tab)
         self.algo_panel.pack(fill="x", **pad)
         self._swap_algo_panel()
@@ -625,6 +632,7 @@ class ResidualTrainerGUI:
             run_name=self.run_name_var.get(),
             resume=self.resume_var.get(),
             vehicle_pc=getattr(self, "_resolved_vehicle_pc", None),
+            net_arch=self.net_arch_var.get(),
             grip=self.grip_var.get(),
             corner=self.corner_var.get(),
             reward=self.reward_var.get(),

@@ -117,3 +117,64 @@ def parse_grip_spec(text):
             raise ValueError(f"bad grip range (lo > hi): {text!r}")
         return GripSpec("range", (lo, hi))
     return GripSpec("fixed", (_grip_value(t),))
+
+
+# --- network shape ---------------------------------------------------------
+# Deployment ceiling, not a training one: the trained weights are exported into
+# a Lua controller that runs the network by hand every 0.5 ms physics tick
+# inside BeamNG. Depth costs latency there, and a net that cannot keep up does
+# not fail loudly -- it just misses ticks.
+NET_MAX_LAYERS = 24
+NET_MAX_WIDTH = 2048
+NET_MIN_WIDTH = 8
+DEFAULT_NET_ARCH = [256, 256, 256]
+
+
+def parse_net_arch(text):
+    """"256,256,256" -> [256, 256, 256]. Blank/"default" -> DEFAULT_NET_ARCH.
+
+    Also accepts "3x256" as shorthand for three layers of 256, since that is
+    how these are usually spoken about."""
+    t = str(text).strip().lower()
+    if t in ("", "default", "none"):
+        return list(DEFAULT_NET_ARCH)
+
+    if "x" in t and "," not in t:
+        count, _, width = t.partition("x")
+        try:
+            count, width = int(count), int(width)
+        except ValueError:
+            raise ValueError(f"bad network shape: {text!r} (expected e.g. \"3x256\")")
+        if count < 1:
+            raise ValueError(f"network needs at least 1 layer, got {count}")
+        layers = [width] * count
+    else:
+        layers = []
+        for part in t.split(","):
+            part = part.strip()
+            if not part:
+                raise ValueError(f"bad network shape: {text!r} (empty layer)")
+            try:
+                layers.append(int(part))
+            except ValueError:
+                raise ValueError(f"bad layer size {part!r} in {text!r}")
+
+    if not layers:
+        raise ValueError(f"bad network shape: {text!r}")
+    if len(layers) > NET_MAX_LAYERS:
+        raise ValueError(
+            f"{len(layers)} layers exceeds the {NET_MAX_LAYERS}-layer limit -- the "
+            f"exported network is evaluated by hand in Lua every 0.5 ms physics "
+            f"tick, and a net too slow to keep up misses ticks silently.")
+    for w in layers:
+        if not (NET_MIN_WIDTH <= w <= NET_MAX_WIDTH):
+            raise ValueError(
+                f"layer width {w} out of range {NET_MIN_WIDTH}..{NET_MAX_WIDTH}")
+    return layers
+
+
+def net_arch_repr(layers):
+    """Compact form for logs/labels: [256,256,256] -> "3x256"."""
+    if layers and all(w == layers[0] for w in layers):
+        return f"{len(layers)}x{layers[0]}"
+    return ",".join(str(w) for w in layers)

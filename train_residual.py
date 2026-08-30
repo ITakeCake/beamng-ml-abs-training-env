@@ -39,7 +39,8 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack, VecNorm
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from residual_core import parse_speeds, parse_pedal_spec, parse_grip_spec
+from residual_core import (parse_speeds, parse_pedal_spec, parse_grip_spec,
+                           parse_net_arch, net_arch_repr)
 from corner import parse_corner_spec
 from residual_log import setup_logging
 from sim_config import (
@@ -327,19 +328,33 @@ def log_resolved_hyperparams(model, args):
     log.info("resolved hyperparams: %s", {**common, **extra})
 
 
+def policy_kwargs_for(args):
+    """net_arch from --net-arch, keeping the reference activation and the
+    pi/qf vs pi/vf split each algorithm expects. Both halves get the same
+    shape, which is what the reference trainers did."""
+    layers = parse_net_arch(args.net_arch)
+    value_key = "qf" if args.algo == "sac" else "vf"
+    if log is not None:      # module-level `log` is only set inside main()
+        log.info("network: %s (%d layers, %s)", net_arch_repr(layers), len(layers),
+                 "default" if layers == parse_net_arch("") else "CUSTOM")
+    return dict(activation_fn=th.nn.ReLU,
+                net_arch={"pi": list(layers), value_key: list(layers)})
+
+
 def build_model(args, venv):
     device = resolve_device(args.device)
+    policy_kwargs = policy_kwargs_for(args)
     if args.algo == "sac":
         return SAC("MlpPolicy", venv, learning_rate=args.lr,
                    buffer_size=args.buffer_size, tau=args.tau,
                    learning_starts=args.learning_starts,
                    target_entropy=args.target_entropy,
                    train_freq=(args.train_freq, "step"), gradient_steps=1,
-                   policy_kwargs=POLICY_KWARGS_SAC, verbose=1, device=device)
+                   policy_kwargs=policy_kwargs, verbose=1, device=device)
     return PPO("MlpPolicy", venv, learning_rate=args.lr, n_steps=args.n_steps,
                batch_size=args.batch_size, n_epochs=args.n_epochs,
                clip_range=args.clip_range, gae_lambda=args.gae_lambda,
-               ent_coef=args.ent_coef, policy_kwargs=POLICY_KWARGS_PPO,
+               ent_coef=args.ent_coef, policy_kwargs=policy_kwargs,
                verbose=1, device=device)
 
 
@@ -357,6 +372,18 @@ def load_resume(args, venv):
             f"--resume checkpoint observation shape {model.observation_space.shape} "
             f"does not match this run's env shape {venv.observation_space.shape} -- "
             f"refusing to resume onto a mismatched policy/env pair.")
+    # --net-arch is ignored on resume (the checkpoint's own shape is loaded), so
+    # a mismatch would silently train a different network than the box says.
+    ckpt_arch = getattr(model.policy, "net_arch", None)
+    wanted = parse_net_arch(args.net_arch)
+    ckpt_layers = (ckpt_arch.get("pi") if isinstance(ckpt_arch, dict) else ckpt_arch)
+    if ckpt_layers and list(ckpt_layers) != wanted:
+        raise RuntimeError(
+            f"--resume checkpoint was trained with network "
+            f"{net_arch_repr(list(ckpt_layers))} but --net-arch says "
+            f"{net_arch_repr(wanted)}. Resuming keeps the CHECKPOINT's shape, so "
+            f"the run would not be what the setting claims. Set the network to "
+            f"{net_arch_repr(list(ckpt_layers))}, or start a fresh run.")
     # This trainer's own save layout is <run_dir>/vecnormalize.pkl (see main()); the
     # "<stem>_vecnorm.pkl" convention is checked too for compatibility with the
     # project's other trainers, but a --resume onto one of THIS trainer's own
@@ -410,6 +437,10 @@ def parse_args():
                    help='override the policy every step, e.g. "0,0" for pure '
                         "slam (zero release = full pedal). Diagnostic control "
                         "runs only -- the policy still trains on garbage.")
+    p.add_argument("--net-arch", default="3x256",
+                   help='hidden layers of the policy/value networks: "3x256" '
+                        'or "512,256,128". Default 3x256 matches the reference '
+                        "trainers. A resumed run must match its checkpoint.")
     p.add_argument("--corner", default="straight",
                    help='brake in a constant-radius turn: radius in metres, '
                         '"50" / "50L" / "50R". "straight" (default) = no corner. '

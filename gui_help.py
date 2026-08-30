@@ -103,6 +103,24 @@ RUN_HELP = {
         "PPO = learns only from recent attempts. Steadier, but needs many more\n"
         "      of them, so it is slower in wall-clock time for this project."
     ),
+    "net_arch": (
+        "The size of the controller's 'brain' -- how many layers of how many\n"
+        "units.\n\n"
+        "3x256 = three layers of 256 units (the default, and what every\n"
+        "        result in this project so far used)\n"
+        "22x128 = twenty-two layers of 128\n"
+        "512,256,128 = three layers of decreasing width\n\n"
+        "Bigger is not better here. Braking is a fairly simple reaction --\n"
+        "wheel speeds in, brake pressure out -- so a deep network mostly adds\n"
+        "training time and a slower controller, without learning anything the\n"
+        "small one could not.\n\n"
+        "There is a hard reason to stay modest: the trained network is\n"
+        "exported into a Lua controller that runs it BY HAND every 0.5 ms\n"
+        "inside the game. A network too slow to finish in time just misses\n"
+        "ticks, with nothing logged. Capped at 24 layers and 2048 wide.\n\n"
+        "Changing this makes results incomparable to earlier runs, and a\n"
+        "resumed run must match the shape its checkpoint was trained with."
+    ),
     "vehicle_pc": (
         "Which car and configuration to train on.\n\n"
         "Pick the model, then a factory trim, or 'Custom' for your own saved\n"
