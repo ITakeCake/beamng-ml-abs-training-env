@@ -385,7 +385,18 @@ class ReferenceRunner:
         steering = initial_steering_guess(radius_m)
         history = []
         for _ in range(STEERING_SEEK_MAX_ITERS):
-            measured, _, _ = self.probe_radius(speed_mph, direction * steering, grip=grip)
+            measured, _, mean_yaw = self.probe_radius(speed_mph, direction * steering,
+                                                       grip=grip)
+            # The seek itself only uses |yaw|, so an inverted sign convention
+            # between beamngpy steering and tel_yaw_rate_inst would pass here
+            # and only surface in training, as a car steering one way while the
+            # reward demands the other. Catch it on the first probe instead.
+            if mean_yaw * direction <= 0.0:
+                raise RuntimeError(
+                    f"steering {direction * steering:+.4f} produced yaw "
+                    f"{mean_yaw:+.4f} rad/s -- opposite signs. The steering and "
+                    f"yaw-rate sign conventions disagree; every corner would be "
+                    f"driven against its own yaw target.")
             history.append((steering, measured))
             if steering_seek_converged(measured, radius_m):
                 log.info("steering seek converged: R=%.1fm steering=%+.4f "

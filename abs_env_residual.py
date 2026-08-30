@@ -440,9 +440,15 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
             return None
         if self._corner.steering is not None:
             return self._corner.signed_steering
-        return self._calibration.steering_for(
+        # Sign from the spec, magnitude from the table. config_key carries no
+        # turn direction, so a row measured on a right-hander would otherwise
+        # steer right while target_yaw_rate demanded left -- yaw error of 2v/R
+        # for the whole episode and a guaranteed "crash" that is pure
+        # bookkeeping. Reusing the magnitude assumes the two directions are
+        # symmetric, which holds on the flat, featureless calibration map.
+        return self._corner.direction * abs(self._calibration.steering_for(
             config_key(grip=self.grip, speed_mph=self.target_mph,
-                       radius_m=self.radius_m))
+                       radius_m=self.radius_m)))
 
     def _start_corner_tracking(self):
         """Arms the arc bookkeeping for the episode the parent just set up.
@@ -451,6 +457,12 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         target_heading once today, so nothing about a straight run moves."""
         self._heading = HeadingTracker(self.start_heading)
         self.target_yaw_rate = 0.0
+        # NOT self._last_gps_speed: the parent resets that to 999.0 and only
+        # fills it in partway through its own step(), so reading it before the
+        # first step would ask for 999/R rad/s of yaw -- one step of that
+        # exhausts the entire terminal yaw budget and triggers the catastrophic
+        # backstop on every corner episode.
+        self._corner_speed = self.start_speed_ms
         if self._corner is None:
             return
         arc = arc_radians(self.start_speed_ms, self._corner.radius_m,
@@ -480,7 +492,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         if self._heading is None:
             return
         if self._corner is not None:
-            self.target_yaw_rate = self._corner.yaw_target(self._last_gps_speed)
+            self.target_yaw_rate = self._corner.yaw_target(self._corner_speed)
             self._heading.advance_target(self.target_yaw_rate, self._dt)
         self.target_heading = self._heading.parent_target()
 
@@ -502,8 +514,10 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
             self._dump_ring("exception")
             raise
 
-        # The parent has just overwritten current_heading from telemetry.
+        # The parent has just overwritten current_heading from telemetry, and
+        # filled in _last_gps_speed for this step.
         self._heading.observe(self.current_heading)
+        self._corner_speed = self._last_gps_speed
 
         rel = np.clip(np.asarray(action, dtype=np.float64)[:2], 0.0, 1.0)
         self._ep_rel_sum += rel

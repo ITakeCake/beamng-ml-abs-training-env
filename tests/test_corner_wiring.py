@@ -106,7 +106,9 @@ class StubEnv(abs_env_residual.ABSLearningEnvResidual):
         self.current_heading = start_heading
         self.target_heading = start_heading
         self.target_yaw_rate = 0.0
-        self._last_gps_speed = start_speed_ms
+        # What abs_env_incar.reset() actually leaves behind: a sentinel that is
+        # only replaced partway through the first step().
+        self._last_gps_speed = 999.0
         self._dt = 1.0 / 200.0
 
 
@@ -124,6 +126,18 @@ def test_straight_line_leaves_the_parents_target_exactly_where_it_was():
         env._heading.observe(env.current_heading)
 
 
+def test_the_first_step_uses_the_start_speed_not_the_parents_sentinel():
+    """abs_env_incar.reset() leaves _last_gps_speed at 999.0 and only fills it
+    in partway through step(). Reading it before the first step would demand
+    999/R rad/s -- one step of that exhausts the whole terminal yaw budget and
+    fires the catastrophic backstop on every single corner episode."""
+    env = StubEnv(CornerSpec(50.0, LEFT, 0.25), start_speed_ms=26.8)
+    env._start_corner_tracking()
+    env._advance_corner_target()
+    assert env.target_yaw_rate == pytest.approx(26.8 / 50.0)
+    assert env._heading.arc_rad < 0.01
+
+
 def test_yaw_target_is_v_over_r_and_falls_with_speed():
     env = StubEnv(CornerSpec(50.0, LEFT, 0.25))
     env._start_corner_tracking()
@@ -131,7 +145,7 @@ def test_yaw_target_is_v_over_r_and_falls_with_speed():
     entry = env.target_yaw_rate
     assert entry == pytest.approx(26.8 / 50.0)
 
-    env._last_gps_speed = 5.0                # late in the stop
+    env._corner_speed = 5.0                  # late in the stop
     env._advance_corner_target()
     assert env.target_yaw_rate == pytest.approx(0.1)
     assert env.target_yaw_rate < entry
@@ -144,7 +158,7 @@ def test_the_parents_heading_error_is_zero_for_a_car_that_holds_the_arc():
     env._start_corner_tracking()
     heading, speed = 0.0, 26.8
     for _ in range(400):
-        env._last_gps_speed = speed
+        env._corner_speed = speed
         env._advance_corner_target()
         heading += (speed / 50.0) * env._dt          # perfect tracking
         speed = max(0.0, speed - 9.0 * env._dt)      # ~0.9 g stop
@@ -159,7 +173,7 @@ def test_a_car_that_runs_wide_accumulates_a_real_heading_error():
     env._start_corner_tracking()
     heading, speed = 0.0, 26.8
     for _ in range(400):
-        env._last_gps_speed = speed
+        env._corner_speed = speed
         env._advance_corner_target()
         heading += 0.5 * (speed / 50.0) * env._dt    # only half the rotation
         speed = max(0.0, speed - 9.0 * env._dt)
@@ -174,7 +188,7 @@ def test_the_arc_sweep_matches_the_geometry_the_guard_was_given():
     env._start_corner_tracking()
     heading, speed = 0.0, 26.8
     while speed > 0.0:
-        env._last_gps_speed = speed
+        env._corner_speed = speed
         env._advance_corner_target()
         heading += (speed / 50.0) * env._dt
         speed = max(0.0, speed - 9.0 * env._dt)
@@ -207,9 +221,27 @@ def test_steering_comes_from_the_row_that_will_also_score_the_episode():
     from calibration import config_key
     key = config_key(grip=0.5, speed_mph=60, radius_m=50.0)
     env = StubEnv(CornerSpec(50.0, LEFT))
-    env._calibration = FakeTable({key: {"steering": -0.27}})
+    env._calibration = FakeTable({key: {"steering": 0.27}})
     env.grip, env.target_mph = 0.5, 60
-    assert env._corner_steering() == pytest.approx(-0.27)
+    assert env._corner_steering() == pytest.approx(0.27)
+
+
+def test_direction_comes_from_the_spec_not_the_stored_sign():
+    """config_key carries no turn direction, so a row measured on a right-hander
+    is the only row a left-hander can find. Taking the stored sign would steer
+    right while target_yaw_rate demanded left -- 2v/R of yaw error all episode
+    and a guaranteed 'crash' that is pure bookkeeping."""
+    from calibration import config_key
+    key = config_key(grip=1.0, speed_mph=60, radius_m=50.0)
+    table = FakeTable({key: {"steering": -0.27}})     # measured turning right
+
+    left = StubEnv(CornerSpec(50.0, LEFT))
+    left._calibration, left.grip, left.target_mph = table, 1.0, 60
+    assert left._corner_steering() == pytest.approx(+0.27)
+
+    right = StubEnv(CornerSpec(50.0, RIGHT))
+    right._calibration, right.grip, right.target_mph = table, 1.0, 60
+    assert right._corner_steering() == pytest.approx(-0.27)
 
 
 def test_an_explicit_spec_angle_wins_over_the_table():

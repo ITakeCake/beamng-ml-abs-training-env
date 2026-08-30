@@ -169,6 +169,34 @@ Deferred; nothing above depends on it.
 4. Grip levels (cheapest new dimension; the pedal-gate result says there is
    headroom below dry asphalt).
 5. Single-radius corner: v/R target per step, tangent-based crash rule,
-   calibration rows for corners.
+   calibration rows for corners.  **[code DONE 2026-08-29; live pass pending]**
+
+   Built: `corner.py` (arc geometry, HeadingTracker, steering seek math),
+   per-step `target_yaw_rate = +-v/R` and tangent-based crash rule wired
+   through the residual env's existing seams, `CornerSteerInjector` (open-loop
+   angle applied at the slam arm, held to the stop), steering seek + corner
+   rows in `reference_runner.py`, `--corner` on the trainer and reference
+   runner, grip/corner/reward fields in the GUI. 391 tests.
+
+   Two things the offline work found, both now guarded:
+   - `obj:getDirection()` wraps at +-pi and the parent's heading error is a raw
+     subtraction, so a corner crossing that branch reads ~2pi for one step and
+     terminates as a CRASH that never happened. Geometry that would cross it is
+     refused at reset.
+   - `_last_gps_speed` is 999.0 immediately after the parent's reset, so the
+     first step of every corner episode would have demanded 999/R rad/s --
+     enough to exhaust the terminal yaw budget and fire the catastrophic
+     backstop on every episode. The env now tracks episode speed itself.
+
+   STILL TO DO (needs BeamNG.tech running, one session):
+   a. Run the steering seek for the first corner (etk800, 60 mph, grip 1.0,
+      R=50) and confirm the yaw-sign guard passes.
+   b. Measure slam/stock corner rows and check the gap is not degenerate.
+   c. Measure how established the turn is at brake onset -- the wheel goes on
+      at the start of the coast-down, so the car may still be turning in. If
+      the yaw rate at onset is far off v/R, the coast needs lengthening.
+   d. The plan-mandated re-validation of the 0.1 rad terminal yaw threshold on
+      a corner: integrated error over a longer stop may need a per-config
+      scale. Measure before changing.
 6. Sliders / presets UI + run stamping (last: easy once the plumbing exists).
 7. Inclines, someday.
