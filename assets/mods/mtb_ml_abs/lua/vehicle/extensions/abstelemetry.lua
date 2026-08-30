@@ -794,10 +794,16 @@ end
 -- every tick until disarmBrakeSlam() so the pedal cannot drop between writes.
 -- =====================================================
 local slamArmTarget = nil
+-- Pedal position the latch holds once it fires. 1 = floored, which is what
+-- training always uses; the reference runner sets it lower to measure a
+-- part-pedal stop. Held in Lua because the latch re-asserts every 0.5 ms tick
+-- and would otherwise stamp full pedal over whatever Python sent.
+local slamPedal = 1
 local slamFired = false
 
-local function armBrakeSlam(target_ms)
+local function armBrakeSlam(target_ms, pedal)
   slamArmTarget = target_ms
+  slamPedal = pedal or 1
   slamFired = false
   electrics.values.tel_slam_armed = 1
   electrics.values.tel_slam_fired = 0
@@ -806,6 +812,7 @@ end
 
 local function disarmBrakeSlam()
   slamArmTarget = nil
+  slamPedal = 1
   slamFired = false
   electrics.values.tel_slam_armed = 0
   electrics.values.tel_slam_fired = 0
@@ -922,7 +929,7 @@ local function updateArmedSlam()
       instSpeed, slamArmTarget))
   end
   if slamFired then
-    input.brake = 1
+    input.brake = slamPedal
   end
 end
 
@@ -1080,6 +1087,12 @@ local function onGraphicsStep(dtSim)
   end
 
   -- === INSTANTANEOUS TO ELECTRICS ===
+  -- Physics-rate speed (obj:getVelocity():length(), recomputed every
+  -- onPhysicsStep). electrics.values.airspeed is GFX-rate and LAGS whenever
+  -- physics outruns graphics -- which is exactly what happens under
+  -- be:setPhysicsSpeedFactor(N>1), so anything pacing a run-up or a coast has
+  -- to read this instead.
+  electrics.values.tel_inst_speed = instSpeed
   electrics.values.tel_gy_inst = instGy
   electrics.values.tel_gx_inst = instGx
   electrics.values.tel_yaw_rate_inst = instYaw

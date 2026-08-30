@@ -124,3 +124,49 @@ def test_a_continuous_range_is_refused_with_the_cost_spelled_out():
 def test_a_list_is_accepted():
     assert validate_calibration_settings(
         _settings(pedal_random=True, pedal_spec="0.5,0.75,1.0")) == []
+
+
+# ------------------------------------------------- the latch honours the pedal
+def _lua():
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return open(os.path.join(root, "abstelemetry.lua"), encoding="utf-8").read()
+
+
+def test_the_slam_latch_holds_the_requested_pedal_not_a_hardcoded_1():
+    """updateArmedSlam re-asserts input.brake every 0.5 ms tick. Hardcoded to 1
+    it stamps full pedal over whatever Python sent, so a --pedals 0.5 run would
+    measure a FULL-pedal stop and file it under a pedal=0.50 key: a silently
+    wrong reference, which is worse than a missing one."""
+    src = _lua()
+    assert "input.brake = slamPedal" in src
+    assert "input.brake = 1\n" not in src
+
+
+def test_arm_brake_slam_takes_a_pedal_and_defaults_to_full():
+    """Defaulting to 1 keeps every existing caller (all of training) unchanged."""
+    src = _lua()
+    assert "function armBrakeSlam(target_ms, pedal)" in src
+    assert "slamPedal = pedal or 1" in src
+
+
+def test_disarm_resets_the_pedal_so_it_cannot_leak_between_episodes():
+    src = _lua()
+    disarm = src[src.index("local function disarmBrakeSlam()"):]
+    assert "slamPedal = 1" in disarm[:200]
+
+
+def test_the_reference_runner_passes_the_pedal_to_the_latch():
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "reference_runner.py"), encoding="utf-8").read()
+    assert "armBrakeSlam({target_ms}, {float(pedal)})" in src
+
+
+def test_the_shipped_mod_copy_has_the_same_fix():
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    bundled = open(os.path.join(root, "assets", "mods", "mtb_ml_abs", "lua",
+                                "vehicle", "extensions", "abstelemetry.lua"),
+                   encoding="utf-8").read()
+    assert "input.brake = slamPedal" in bundled

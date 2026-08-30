@@ -12,6 +12,7 @@ sys.path.insert(0, HERE)
 
 import gui_help
 import gui_state
+import calibration_progress as calprog
 from gui_cmd import (build_cmd, build_calibration_cmd, validate_settings,
                      validate_calibration_settings)
 from residual_log import setup_logging, tail_lines
@@ -835,28 +836,142 @@ class ResidualTrainerGUI:
 
         cmd = build_calibration_cmd(settings, car=model)
         corner = settings.get("corner") or "straight"
+        planned = self._planned_stops(settings)
         if not messagebox.askokcancel(
                 "Calibrate baselines",
                 f"Measure slam and stock ABS references for {model}.\n\n"
                 f"speeds: {settings['speeds']}\n"
                 f"grip: {settings.get('grip') or 'stock'}\n"
                 f"corner: {corner}\n\n"
-                f"This drives the car repeatedly and takes a while (a corner also "
-                f"seeks its steering angle first). Results are cached in "
-                f"calibration/{model}.json -- it only needs running once per "
+                f"{planned} stops in total. This drives the car repeatedly (a "
+                f"corner also seeks its steering angle first). Results are cached "
+                f"in calibration/{model}.json -- it only needs running once per "
                 f"configuration.\n\nStart?"):
             log.info("calibration cancelled by user")
             return
 
-        creationflags = subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0
+        # No console: progress comes from the log, which the runner writes
+        # anyway, so a black window full of beamngpy chatter tells the user
+        # nothing they cannot see better in the bar below.
+        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        log_path = os.path.join(HERE, "logs", "calibration.log")
         try:
+            mark = os.path.getsize(log_path) if os.path.exists(log_path) else 0
             proc = subprocess.Popen(cmd, cwd=HERE, creationflags=creationflags)
         except OSError as e:
             log.error("calibration launch FAILED: %s: %s  cmd=%s", type(e).__name__, e, cmd)
             messagebox.showerror("Launch failed", f"{e}\n\nSee logs\\gui.log")
             return
-        log.info("launched calibration pid=%d car=%s cmd=%s", proc.pid, model, cmd)
+        log.info("launched calibration pid=%d car=%s stops=%d cmd=%s",
+                 proc.pid, model, planned, cmd)
         self.status_var.set(f"calibrating {model} (pid {proc.pid})")
+        self._open_calibration_window(proc, model, planned, log_path, mark)
+
+    def _planned_stops(self, settings):
+        """How many stops the chosen configuration implies."""
+        from residual_core import (parse_speeds, parse_grip_spec, parse_pedal_spec)
+        speeds = parse_speeds(settings["speeds"])
+        grip = parse_grip_spec(settings.get("grip") or "off")
+        grips = (grip.levels() if grip else None) or [1.0]
+        pedals = [1.0]
+        if settings.get("pedal_random") and settings.get("pedal_spec"):
+            spec = parse_pedal_spec(settings["pedal_spec"])
+            pedals = (spec.levels() if spec else None) or [1.0]
+        reps = 3      # reference_runner's own default
+        return calprog.planned_stops(speeds, grips, pedals, reps)
+
+    def _open_calibration_window(self, proc, car, planned, log_path, mark):
+        win = tk.Toplevel(self.root)
+        win.title(f"Calibrating {car}")
+        win.geometry("620x260")
+        pad = dict(padx=10, pady=6)
+
+        ttk.Label(win, text=f"Measuring slam and stock references for {car}",
+                  font=("Segoe UI", 10, "bold")).pack(anchor="w", **pad)
+
+        bar = ttk.Progressbar(win, mode="determinate", maximum=planned)
+        bar.pack(fill="x", **pad)
+
+        status = tk.StringVar(value="starting BeamNG...")
+        ttk.Label(win, textvariable=status).pack(anchor="w", **pad)
+
+        detail = tk.StringVar(value="")
+        ttk.Label(win, textvariable=detail, foreground="#555").pack(anchor="w", **pad)
+
+        rows = tk.StringVar(value="")
+        ttk.Label(win, textvariable=rows, foreground="#555").pack(anchor="w", **pad)
+
+        btns = ttk.Frame(win)
+        btns.pack(fill="x", side="bottom", **pad)
+        # Calibration has no graceful-stop file, so cancelling really does mean
+        # killing it. Rows already written to the table survive -- put() saves
+        # per row, so a cancelled run keeps what it measured.
+        ttk.Button(btns, text="Cancel",
+                   command=lambda: self._cancel_calibration(proc, win)).pack(side="right")
+        ttk.Button(btns, text="Hide", command=win.withdraw).pack(side="right", padx=6)
+
+        state = {"proc": proc, "win": win, "planned": planned,
+                 "log_path": log_path, "mark": mark, "car": car,
+                 "bar": bar, "status": status, "detail": detail, "rows": rows}
+        self._calibration = state
+        win.protocol("WM_DELETE_WINDOW", win.withdraw)
+        self._poll_calibration()
+
+    def _cancel_calibration(self, proc, win):
+        if not messagebox.askyesno(
+                "Cancel calibration",
+                "Stop the calibration run?\n\nRows already measured are kept -- "
+                "the table is written after each one -- so cancelling loses only "
+                "the configuration currently being measured."):
+            return
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+        log.info("calibration cancelled by user")
+        win.destroy()
+        self._calibration = None
+        self.status_var.set("calibration cancelled")
+
+    def _poll_calibration(self):
+        st = getattr(self, "_calibration", None)
+        if not st:
+            return
+        try:
+            with open(st["log_path"], encoding="utf-8", errors="ignore") as fh:
+                fh.seek(st["mark"])
+                text = fh.read()
+        except OSError:
+            text = ""
+        # whole_file: `text` is already only this run's slice (seeked past the
+        # mark taken at launch), so re-trimming would drop its start.
+        prog = calprog.parse_progress(text, total_stops=st["planned"],
+                                      whole_file=True)
+        st["bar"]["value"] = prog["stops_done"]
+        st["status"].set(calprog.describe(prog))
+        if prog["seconds_per_stop"]:
+            st["detail"].set(f"{prog['seconds_per_stop']:.0f}s per stop  |  "
+                             f"{prog['rows_done']} configuration(s) written")
+        st["rows"].set(f"log: {os.path.basename(st['log_path'])}")
+
+        alive = st["proc"].poll() is None
+        if alive:
+            self.root.after(2000, self._poll_calibration)
+            return
+
+        if prog["finished"]:
+            st["bar"]["value"] = st["planned"]
+            st["status"].set(f"done -- {prog['stops_done']} stops measured")
+            self.status_var.set(f"calibration finished ({st['car']})")
+            log.info("calibration finished: %s stops, wrote %s",
+                     prog["stops_done"], prog["out_path"])
+            self._refresh_output_models()
+        else:
+            why = prog["failed"][1] if prog["failed"] else "see logs\\calibration.log"
+            st["status"].set("FAILED -- " + str(why)[:120])
+            self.status_var.set("calibration failed")
+            log.error("calibration failed: %s", why)
+        self._calibration = None
 
     def stop(self):
         stop_path = os.path.join(HERE, "STOP_TRAINING.txt")

@@ -95,12 +95,27 @@ def get_quat(x, y, z):
 
 
 class ReferenceRunner:
-    def __init__(self, sim_cfg, reference, port=None):
+    """Measures reference stops.
+
+    `speed_factor` fast-forwards the ENGINE (be:setPhysicsSpeedFactor, the same
+    mechanism BeamNG's own ESC-calibration harness uses at 2x and its FFB
+    calibration at 100x). `live` drops deterministic stepping for the measured
+    stop and lets the game free-run instead.
+
+    Both change the regime the number was produced in, and the project's own
+    notes record deterministic-vs-live moving braking g by 0.04-0.09 -- a third
+    of the stock-over-slam margin. So neither is a silent default: they are
+    flags, and a table measured with them is only comparable to other tables
+    measured the same way."""
+
+    def __init__(self, sim_cfg, reference, port=None, speed_factor=1.0, live=False):
         if reference not in REFERENCE_CARS:
             raise ValueError(f"reference must be one of {sorted(REFERENCE_CARS)}")
         self.reference = reference
         self.cfg = sim_cfg
         self.port = port or sim_cfg.port
+        self.speed_factor = float(speed_factor)
+        self.live = bool(live)
 
         kwargs = dict(host="localhost", port=self.port, home=sim_cfg.game_folder)
         user = resolved_userpath(sim_cfg)
@@ -156,6 +171,72 @@ class ReferenceRunner:
         log.info("telemetry: %s", status)
         if "OK" not in str(status):
             raise RuntimeError(f"abstelemetry failed to initialize: {status}")
+
+    def _await_live_result(self, speed_mph, grip, pedal, radius_m, steering):
+        """Free-running measurement: wait for Lua to publish a completed brake
+        event, then read it. No stepping, no per-step round trips."""
+        # The Lua latch decides the exact TICK the pedal goes down, but
+        # vehicle.control is what actually applies it: the game's ~60 Hz input
+        # update re-propagates whatever vehicle.control last said, so leaving it
+        # at 0 means the latch's write is overwritten 60 times a second and the
+        # car coasts on engine braking alone (~0.6 m/s^2, measured). Stepped
+        # mode re-sent this every step and the file's own comment says why --
+        # "the car simply never stopped" -- which is exactly what happened here.
+        self.vehicle.control(brake=float(pedal), throttle=0.0)
+        deadline = time.monotonic() + 90.0
+        result_g = 0.0
+        neutral_dropped = False
+        while time.monotonic() < deadline:
+            time.sleep(0.05)
+            self.vehicle.sensors.poll()
+            spd = float(self.vehicle.sensors["electrics"].get("tel_inst_speed", 999.0))
+            if not neutral_dropped and spd < 1.118:      # 2.5 mph, as stepped mode
+                self.vehicle.control(brake=float(pedal), gear=0)
+                neutral_dropped = True
+            e = self.vehicle.sensors["electrics"]
+            result_g = float(e.get("tel_last_brake_avg_g_arc", 0.0))
+            if result_g > 0.0:
+                break
+
+        self.vehicle.queue_lua_command("extensions.abstelemetry.disarmBrakeSlam()")
+        self.vehicle.control(brake=0.0, throttle=0.0)
+        self._set_speed_factor(-1)          # back to stepped for the next stop
+        self.bng.control.pause()
+        self.bng.settings.set_deterministic(DETERM_HZ)
+        self.bng.step(5)
+        self.vehicle.sensors.poll()
+        e = self.vehicle.sensors["electrics"]
+
+        result = {
+            "reference": self.reference,
+            "speed_mph": speed_mph,
+            "grip": float(grip),
+            "pedal": float(pedal),
+            "radius_m": radius_m,
+            "steering": None if steering is None else float(steering),
+            "stopped": result_g > 0.0,
+            "avg_g_arc": float(e.get("tel_last_brake_avg_g_arc", 0.0)),
+            "dist_arc": float(e.get("tel_last_brake_dist_arc", 0.0)),
+            "avg_g_chord": float(e.get("tel_last_brake_avg_g", 0.0)),
+            "dist_chord": float(e.get("tel_last_brake_dist", 0.0)),
+            "grip_applied": float(e.get("tel_grip_mult", 1.0)),
+            "grip_nodes": int(e.get("tel_grip_nodes", 0)),
+        }
+        log.info("%s @ %s mph [live x%g]: arc_g=%.4f arc_dist=%.2fm",
+                 self.reference, speed_mph, self.speed_factor,
+                 result["avg_g_arc"], result["dist_arc"])
+        if result["avg_g_arc"] <= 0.0:
+            raise RuntimeError(
+                f"no brake event completed within 90s ({self.reference}, "
+                f"{speed_mph} mph, live x{self.speed_factor}) -- the 2 kHz latch "
+                f"never fired or the car never stopped.")
+        return result
+
+    def _set_speed_factor(self, value):
+        """0 = normal real-time non-deterministic, -1 = deterministic/stepped,
+        N>1 = N times faster than wall clock. Queued on the GAME ENGINE Lua
+        (not the vehicle), which is where be: lives."""
+        self.bng.control.queue_lua_command(f"be:setPhysicsSpeedFactor({value})")
 
     def _install_telemetry(self):
         """abstelemetry.lua must be resolvable by extensions.load() in the live
@@ -214,14 +295,25 @@ class ReferenceRunner:
         # --- accelerate (non-deterministic for speed), then coast IN GEAR ---
         self.bng.settings.set_nondeterministic()
         self.bng.control.resume()
+        # The run-up is not measured, so fast-forwarding it is free. This is
+        # the only wall-clock-bound part of a stop: a sleep-poll loop with a
+        # 25 s deadline.
+        if self.speed_factor > 1.0:
+            self._set_speed_factor(self.speed_factor)
         accel_target_ms = (speed_mph + ACCEL_OVERSHOOT_MPH) * 0.44704
         self.vehicle.control(gear=2, throttle=1.0, steering=0, brake=0)
         deadline = time.monotonic() + 25.0
         reached = False
         while time.monotonic() < deadline:
-            time.sleep(0.02)
+            time.sleep(0.02 / max(1.0, self.speed_factor))
             self.vehicle.sensors.poll()
-            if self.vehicle.sensors["electrics"].get("airspeed", 0.0) >= accel_target_ms:
+            e = self.vehicle.sensors["electrics"]
+            # tel_inst_speed is computed in onPhysicsStep; electrics.airspeed is
+            # GFX-rate and LAGS when physics outruns graphics -- exactly what
+            # abstelemetry v3.3's own comment warns about at speed_factor > 1.
+            # Reading the laggy one at 10x overshoots the target badly.
+            spd = float(e.get("tel_inst_speed", e.get("airspeed", 0.0)))
+            if spd >= accel_target_ms:
                 reached = True
                 break
         if not reached:
@@ -230,12 +322,22 @@ class ReferenceRunner:
                 f"(reference={self.reference}, {speed_mph} mph)")
 
         self.vehicle.control(throttle=0.0, steering=0)
-        self.bng.control.pause()
-        self.bng.settings.set_deterministic(DETERM_HZ)
+        if self.live:
+            # Free-running: the 2 kHz latch and the brake-event accumulator are
+            # entirely in Lua, so the measurement does not need Python in the
+            # loop at all -- stepping only ever paced the stop-detection poll.
+            self._set_speed_factor(self.speed_factor if self.speed_factor > 1.0 else 0)
+        else:
+            self.bng.control.pause()
+            self.bng.settings.set_deterministic(DETERM_HZ)
 
         # --- 2 kHz-exact brake onset (identical to training) ---
+        # Pedal goes to the LATCH, not just to vehicle.control: the latch
+        # re-asserts input.brake every 0.5 ms tick and would otherwise stamp
+        # full pedal over the level being measured, writing a full-pedal result
+        # under a part-pedal key.
         self.vehicle.queue_lua_command(
-            f"extensions.abstelemetry.armBrakeSlam({target_ms})")
+            f"extensions.abstelemetry.armBrakeSlam({target_ms}, {float(pedal)})")
         # Grip is armed the SAME way training arms it (at brake onset, after the
         # slam target is set) -- a reference measured with different timing is
         # not comparable to the runs it is meant to be the ruler for.
@@ -245,14 +347,22 @@ class ReferenceRunner:
         if steering is not None:
             self.vehicle.control(steering=float(steering))
         fired = False
-        for _ in range(600):
+        if self.live:
+            fired = True      # the latch fires in Lua; the result wait proves it
+        for _ in range(0 if self.live else 600):
             self.bng.step(20)
             self.vehicle.sensors.poll()
             if int(self.vehicle.sensors["electrics"].get("tel_slam_fired", 0)) == 1:
                 fired = True
                 break
         if not fired:
-            raise RuntimeError(f"brake slam never fired ({self.reference}, {speed_mph} mph)")
+            raise RuntimeError(
+                f"brake slam never fired ({self.reference}, {speed_mph} mph, "
+                f"speed_factor={self.speed_factor}, live={self.live}). The latch "
+                f"compares physics-rate instSpeed against the target every tick, "
+                f"so this means the car never crossed it -- usually the coast "
+                f"never started (throttle still on) or the run-up overshot so far "
+                f"the target was already passed when the slam was armed.")
 
         # --- ride the stop out (identical regime to abs_env_incar.step) ---
         # The pedal must be re-sent from the Python side every step, not just
@@ -265,15 +375,37 @@ class ReferenceRunner:
         stop_timer = 0
         stopped = False
         neutral_dropped = False
+        if self.live:
+            # Nothing here paces the physics, so tracking speed from Python is
+            # hopeless: at ~5x realtime a 50 ms wall poll sees the car once per
+            # 250 ms of sim time, which is several mph of coast per sample --
+            # easily enough to miss the target crossing entirely.
+            #
+            # It does not need to. The 2 kHz latch, the pedal hold and the whole
+            # brake-event accumulator run in Lua; the ONLY thing Python needs is
+            # the finished result, which Lua publishes as tel_last_brake_avg_g_arc
+            # when the event completes. So wait for that, and let the game get on
+            # with it.
+            return self._await_live_result(speed_mph, grip, pedal, radius_m, steering)
+
+        # In stepped mode the pedal is re-sent every step: the game's ~60 Hz
+        # input update otherwise writes input.brake back down, fighting the
+        # 2 kHz latch (observed live -- the car simply never stopped).
+        stop_deadline = time.monotonic() + 60.0
         for _ in range(MAX_STOP_STEPS):
             self.vehicle.sensors.poll()
             spd = float(self.vehicle.sensors["electrics"].get("airspeed", 999.0))
             if not neutral_dropped and spd < 1.118:      # 2.5 mph
                 self.vehicle.control(brake=float(pedal), gear=0)
                 neutral_dropped = True
-            else:
+            elif not self.live:
                 self.vehicle.control(brake=float(pedal))
-            self.bng.step(1)
+            if self.live:
+                time.sleep(0.02)
+                if time.monotonic() > stop_deadline:
+                    break
+            else:
+                self.bng.step(1)
             self.vehicle.sensors.poll()
             spd = float(self.vehicle.sensors["electrics"].get("airspeed", 999.0))
             stop_timer = stop_timer + 1 if spd < STOP_SPEED_MS else 0
@@ -282,6 +414,12 @@ class ReferenceRunner:
                 break
         self.vehicle.queue_lua_command("extensions.abstelemetry.disarmBrakeSlam()")
         self.vehicle.control(brake=0.0)
+        # Every first-party call site pairs a set with a reset; a leaked factor
+        # would silently change every stop measured after this one.
+        if self.speed_factor > 1.0 or self.live:
+            self._set_speed_factor(-1 if not self.live else 0)
+            self.bng.control.pause()
+            self.bng.settings.set_deterministic(DETERM_HZ)
         self.bng.step(5)
         self.vehicle.sensors.poll()
         e = self.vehicle.sensors["electrics"]
@@ -436,7 +574,7 @@ class ReferenceRunner:
 
 def run_calibration(sim_cfg, car, speeds, reps, grips=(1.0,), radius_m=STRAIGHT,
                     out_dir=None, port=None, lead_seconds=0.0, direction=LEFT,
-                    pedals=(1.0,)):
+                    pedals=(1.0,), speed_factor=1.0, live=False):
     """Measures both references at every (speed, grip) and writes the table.
 
     For a corner, the steering angle is sought FIRST -- once per (speed, grip),
@@ -449,7 +587,8 @@ def run_calibration(sim_cfg, car, speeds, reps, grips=(1.0,), radius_m=STRAIGHT,
     table = CalibrationTable.load(path) if os.path.exists(path) else CalibrationTable(car=car)
 
     if radius_m is not STRAIGHT:
-        seeker = ReferenceRunner(sim_cfg, "slam", port=port)
+        seeker = ReferenceRunner(sim_cfg, "slam", port=port,
+                                 speed_factor=speed_factor, live=live)
         try:
             for mph in speeds:
                 for grip in grips:
@@ -467,7 +606,8 @@ def run_calibration(sim_cfg, car, speeds, reps, grips=(1.0,), radius_m=STRAIGHT,
         time.sleep(2)
 
     for reference in ("slam", "stock"):
-        runner = ReferenceRunner(sim_cfg, reference, port=port)
+        runner = ReferenceRunner(sim_cfg, reference, port=port,
+                                 speed_factor=speed_factor, live=live)
         try:
             for mph in speeds:
                 for grip in grips:
@@ -520,6 +660,17 @@ def parse_args():
                    help='driver pedal positions to calibrate, e.g. "1.0,0.75,0.5". '
                         "Each needs its own references, since a half-pedal stop "
                         "cannot reach the full-pedal lockup floor.")
+    p.add_argument("--speed-factor", type=float, default=1.0,
+                   help="fast-forward the engine by this factor "
+                        "(be:setPhysicsSpeedFactor -- BeamNG's own ESC calibration "
+                        "uses 2). 1 = off. Changes the regime the number was "
+                        "measured in, so a table is only comparable to others "
+                        "measured the same way.")
+    p.add_argument("--live", action="store_true",
+                   help="measure the stop free-running instead of stepped. The "
+                        "2 kHz measurement is entirely in Lua, so stepping only "
+                        "ever paced the stop-detection poll -- but live and "
+                        "deterministic give different g (0.04-0.09 apart).")
     p.add_argument("--corner", default="straight",
                    help='corner radius in metres, "50" / "50L" / "50R"; '
                         '"straight" (default) = no corner')
@@ -557,7 +708,8 @@ def main():
                                   pedals=pedals,
                                   radius_m=STRAIGHT if corner is None else corner.radius_m,
                                   direction=LEFT if corner is None else corner.direction,
-                                  port=args.port, lead_seconds=args.grip_lead)
+                                  port=args.port, lead_seconds=args.grip_lead,
+                                  speed_factor=args.speed_factor, live=args.live)
 
     print("\n--- CALIBRATION ---")
     for key in sorted(table.rows):
