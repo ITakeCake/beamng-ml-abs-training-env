@@ -23,9 +23,16 @@ def test_check_supported_allows_grip_now_that_it_is_implemented():
     check_supported(grip=0.5, radius_m=STRAIGHT)    # must not raise
 
 
-def test_check_supported_refuses_a_corner():
-    with pytest.raises(NotImplementedError):
+def test_check_supported_refuses_a_corner_with_no_measured_steering_angle():
+    """A corner asked for with no angle would brake in a straight line and get
+    written under a key claiming a radius -- the exact class of silently-wrong
+    row the runner exists to refuse."""
+    with pytest.raises(ValueError, match="steering seek"):
         check_supported(grip=1.0, radius_m=50)
+
+
+def test_check_supported_allows_a_corner_once_the_angle_is_known():
+    check_supported(grip=1.0, radius_m=50, steering=0.25)   # must not raise
 
 
 def test_reference_cars_differ_only_in_the_abs_slot():

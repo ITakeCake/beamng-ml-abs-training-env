@@ -38,10 +38,14 @@ from residual_core import residual_to_brakes
 from residual_log import get_logger, StepRingBuffer
 from sim_config import SimConfig, resolved_userpath
 from calibration import config_key
+from corner import HeadingTracker, arc_radians, heading_branch_is_safe
 from reward_spec import RewardSpec
 
 PEDAL_OBS_INDEX = 27
 OBS_DIM = 28
+# Deliberately pessimistic: a LOWER assumed deceleration means a LONGER stop,
+# a wider arc, and therefore a stricter heading-branch guard.
+ARC_DECEL_ESTIMATE_MS2 = 5.0
 STEP_RING_CAPACITY = 50   # per-step detail kept in memory, dumped only on bad episodes
 
 log = get_logger("env")
@@ -183,6 +187,59 @@ class GripArmInjector:
         return False
 
 
+class CornerSteerInjector:
+    """Turns the wheel inside the parent's reset(), at the same hook the grip
+    change uses: the queued `armBrakeSlam`.
+
+    That is the last moment the parent touches steering (it holds steering=0
+    through acceleration so the car reaches speed in a straight line), and it
+    is followed by the coast-down loop -- so the wheel goes on at the start of
+    the coast and the car turns in before the slam latches. Steering is not
+    re-sent afterwards: the parent's per-step `vehicle.control(brake=1.0)`
+    sends only the arguments it was given, so an input it never mentions keeps
+    the value it was last set to.
+
+    Open loop, one fixed angle, held to the stop. A closed-loop arc follower
+    would react differently to each car, which would make a measured
+    "stock ABS advantage in a corner" partly an advantage of the follower --
+    the calibration only means anything if slam, stock and the model steer
+    identically.
+
+    `steering` may be a number or a zero-argument callable. It is a callable
+    when the angle depends on values the parent only sets partway through its
+    own reset (the episode's target speed): resolving it at the arm point means
+    one corner can train across a speed list, each episode steering by the angle
+    that row was actually calibrated at."""
+
+    def __init__(self, vehicle, steering):
+        self.vehicle = vehicle
+        self.steering = steering
+        self.applied = False
+        self.angle = None
+        self._original = None
+
+    def __enter__(self):
+        if self.steering is None:
+            return self
+        self._original = self.vehicle.queue_lua_command
+
+        def wrapped(cmd):
+            self._original(cmd)
+            if not self.applied and "armBrakeSlam" in cmd:
+                self.angle = float(self.steering() if callable(self.steering)
+                                   else self.steering)
+                self.vehicle.control(steering=self.angle)
+                self.applied = True
+
+        self.vehicle.queue_lua_command = wrapped
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._original is not None:
+            self.vehicle.queue_lua_command = self._original
+        return False
+
+
 def _maybe_override_vehicle_pc(vehicle_pc):
     """Set BEFORE super().__init__(): abs_env_incar.py reads its own module
     global VEHICLE_PC_INCAR (not a constructor parameter) when forcing the
@@ -201,7 +258,8 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
 
     def __init__(self, *args, sim_config=None, vehicle_pc=None, pedal_range=None,
                  reward_spec=None, calibration_table=None, grip=1.0,
-                 radius_m=None, grip_spec=None, grip_lead_seconds=0.0, **kwargs):
+                 radius_m=None, grip_spec=None, grip_lead_seconds=0.0,
+                 corner_spec=None, **kwargs):
         # self._sim_config must exist before super().__init__() runs -- the
         # parent's __init__ calls self._apply_performance_tuning(...) (our
         # override below) partway through its own body.
@@ -212,7 +270,19 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         self._reward_spec = reward_spec or RewardSpec.v5()
         self._calibration = calibration_table
         self.grip = grip
-        self.radius_m = radius_m
+        # A CornerSpec owns the radius once one is given; the bare radius_m
+        # argument stays for callers that only want to key a calibration row.
+        self._corner = corner_spec
+        self.radius_m = corner_spec.radius_m if corner_spec else radius_m
+        if (corner_spec is not None and corner_spec.steering is None
+                and not (calibration_table and calibration_table.steering)):
+            # Fail here, not 40 minutes into a run: with no angle the car would
+            # brake in a straight line while every log said it was cornering.
+            raise ValueError(
+                f"corner R={corner_spec.radius_m} m has no steering angle and the "
+                f"calibration table has none either -- run the steering seek "
+                f"(reference_runner.py --corner ...) before training this corner.")
+        self._heading = None
         # None => "stock": grip is never touched, and _draw_grip returns 1.0 so
         # the calibration key still says grip=1.000 (which is what stock IS).
         self._grip_spec = grip_spec
@@ -322,9 +392,16 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
                  "stock" if self._grip_spec is None else f"{self.grip:.3f}",
                  self.fixed_mph)
         try:
-            with GripArmInjector(self.vehicle, self._pending_grip,
+            steer = None if self._corner is None else self._corner_steering
+            with CornerSteerInjector(self.vehicle, steer) as steer_inj,                  GripArmInjector(self.vehicle, self._pending_grip,
                                  self.grip_lead_seconds) as inj:
                 obs, info = super().reset(seed=seed)
+            if self._corner is not None and not steer_inj.applied:
+                raise RuntimeError(
+                    "corner steering was never applied during reset() -- the "
+                    "parent's armBrakeSlam call was not seen, so this episode "
+                    f"would have braked in a straight line while being logged "
+                    f"as radius={self.radius_m} m. Refusing to continue.")
             if self._pending_grip is not None and not inj.armed:
                 raise RuntimeError(
                     "grip change was never armed during reset() -- the parent's "
@@ -339,6 +416,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
                       type(e).__name__, e)
             raise
         self._ep_t0 = time.monotonic()
+        self._start_corner_tracking()
         log.info("reset ok: episode=%d target=%smph start_speed=%.2fm/s took=%.1fs",
                  self.episode_count, self.target_mph, self.start_speed_ms,
                  self._ep_t0 - t0)
@@ -353,7 +431,61 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         info["episode_pedal"] = self.episode_pedal
         return self._append_pedal(obs), info
 
+    def _corner_steering(self):
+        """The angle for the episode about to run. An explicit CornerSpec angle
+        wins; otherwise it comes from the calibration row for this episode's
+        (grip, speed, radius) -- the same row whose slam/stock references will
+        score it, so the run and its ruler are driven identically."""
+        if self._corner is None:
+            return None
+        if self._corner.steering is not None:
+            return self._corner.signed_steering
+        return self._calibration.steering_for(
+            config_key(grip=self.grip, speed_mph=self.target_mph,
+                       radius_m=self.radius_m))
+
+    def _start_corner_tracking(self):
+        """Arms the arc bookkeeping for the episode the parent just set up.
+        Straight-line episodes get a tracker too: it then reports the start
+        heading unchanged on every step, exactly what abs_env_incar assigns to
+        target_heading once today, so nothing about a straight run moves."""
+        self._heading = HeadingTracker(self.start_heading)
+        self.target_yaw_rate = 0.0
+        if self._corner is None:
+            return
+        arc = arc_radians(self.start_speed_ms, self._corner.radius_m,
+                          ARC_DECEL_ESTIMATE_MS2)
+        if not heading_branch_is_safe(self.start_heading, arc,
+                                      self._corner.direction):
+            raise RuntimeError(
+                f"corner would sweep {arc:.2f} rad from a start heading of "
+                f"{self.start_heading:.2f} rad, crossing the +-pi wrap in the raw "
+                "heading channel. The parent subtracts raw headings, so one step "
+                "mid-corner would read a ~2pi deviation and terminate the episode "
+                "as a CRASH that never happened. Spawn the car facing nearer 0.")
+        log.info("corner: R=%.1fm dir=%s steering=%+.3f arc=%.2frad "
+                 "entry_yaw_target=%.3frad/s", self._corner.radius_m,
+                 "L" if self._corner.direction > 0 else "R",
+                 self._corner.signed_steering, arc,
+                 self._corner.yaw_target(self.start_speed_ms))
+
+    def _advance_corner_target(self):
+        """Move the arc tangent one step, and hand the parent a target heading
+        its own `abs(current - target)` will evaluate to the true deviation.
+
+        target_yaw_rate is recomputed here from the CURRENT speed rather than
+        latched at brake onset: the demand is v/R, and v is falling to zero
+        over the stop. Speed is last step's reading (the parent has not polled
+        yet) -- one step of lag at 200 Hz, i.e. under 0.3% of the entry speed."""
+        if self._heading is None:
+            return
+        if self._corner is not None:
+            self.target_yaw_rate = self._corner.yaw_target(self._last_gps_speed)
+            self._heading.advance_target(self.target_yaw_rate, self._dt)
+        self.target_heading = self._heading.parent_target()
+
     def step(self, action):
+        self._advance_corner_target()
         fr, fl, rr, rl = residual_to_brakes(np.asarray(action, dtype=np.float64),
                                             self.episode_pedal)
         # Parent step() maps its 4-float action via brakes = 0.01+0.99*a then
@@ -369,6 +501,9 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
                       self.steps_taken, self.episode_count, type(e).__name__, e)
             self._dump_ring("exception")
             raise
+
+        # The parent has just overwritten current_heading from telemetry.
+        self._heading.observe(self.current_heading)
 
         rel = np.clip(np.asarray(action, dtype=np.float64)[:2], 0.0, 1.0)
         self._ep_rel_sum += rel

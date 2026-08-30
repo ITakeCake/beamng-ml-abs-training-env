@@ -75,6 +75,12 @@ def normalized_g(g, slam_g, stock_g):
 class CalibrationTable:
     car: str
     rows: dict = dataclasses.field(default_factory=dict)
+    # Corner configs only: the open-loop steering angle measured to hold the
+    # row's radius, keyed the same way the rows are. Stored beside the
+    # references because it is part of the procedure they were measured with --
+    # a corner reference measured at one angle is not a ruler for a run driven
+    # at another.
+    steering: dict = dataclasses.field(default_factory=dict)
 
     def put(self, key, reference, summary):
         if reference not in REFERENCES:
@@ -101,21 +107,44 @@ class CalibrationTable:
                 f"{missing} -- both references are required to normalize.")
         return row["slam"]["median"], row["stock"]["median"]
 
+    def put_steering(self, key, steering, measured_radius):
+        self.steering[key] = {"steering": float(steering),
+                              "measured_radius": float(measured_radius)}
+
+    def steering_for(self, key):
+        """The measured angle for this corner config. Raises rather than
+        returning a guess: an unmeasured angle drives some other radius than
+        the one the references were measured on."""
+        entry = self.steering.get(key)
+        if entry is None:
+            raise KeyError(
+                f"no steering angle for {key!r} on car {self.car!r} -- run the "
+                f"steering seek for this corner before training it.")
+        return entry["steering"]
+
     def save(self, path):
         os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump({"car": self.car, "rows": self.rows}, fh, indent=2, sort_keys=True)
+            payload = {"car": self.car, "rows": self.rows}
+            if self.steering:
+                payload["steering"] = self.steering
+            json.dump(payload, fh, indent=2, sort_keys=True)
 
     @classmethod
     def load(cls, path):
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
-        return cls(car=data.get("car", ""), rows=data.get("rows", {}))
+        return cls(car=data.get("car", ""), rows=data.get("rows", {}),
+                   steering=data.get("steering", {}))
 
 
 def table_hash(table):
     """Content hash, stamped into every run so a result can always be traced
     to the exact reference numbers it was scored against."""
-    blob = json.dumps({"car": table.car, "rows": table.rows},
-                      sort_keys=True, separators=(",", ":"))
+    payload = {"car": table.car, "rows": table.rows}
+    if table.steering:
+        # Absent on a straight-line-only table, so tables stamped before corners
+        # existed keep the hash they were stamped with.
+        payload["steering"] = table.steering
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]

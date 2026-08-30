@@ -3,7 +3,8 @@ No game/GUI imports -- pure functions so the command builder is independently te
 
 import sys
 
-from residual_core import parse_speeds, parse_pedal_spec
+from residual_core import parse_speeds, parse_pedal_spec, parse_grip_spec
+from corner import parse_corner_spec
 
 PYTHON = sys.executable
 
@@ -30,6 +31,15 @@ def build_cmd(settings):
     if settings.get("vehicle_pc"):
         cmd += ["--vehicle-pc", settings["vehicle_pc"]]
 
+    # Omitted keys keep train_residual.py's own defaults, so a settings dict
+    # written before these existed still builds a valid command.
+    if settings.get("reward"):
+        cmd += ["--reward", str(settings["reward"])]
+    if settings.get("grip"):
+        cmd += ["--grip", str(settings["grip"])]
+    if settings.get("corner"):
+        cmd += ["--corner", str(settings["corner"])]
+
     return cmd
 
 
@@ -42,6 +52,16 @@ def validate_settings(settings):
     if settings["pedal_random"]:
         try:
             parse_pedal_spec(settings["pedal_spec"])
+        except ValueError as e:
+            problems.append(str(e))
+    if settings.get("grip"):
+        try:
+            parse_grip_spec(settings["grip"])
+        except ValueError as e:
+            problems.append(str(e))
+    if settings.get("corner"):
+        try:
+            parse_corner_spec(settings["corner"])
         except ValueError as e:
             problems.append(str(e))
     return problems

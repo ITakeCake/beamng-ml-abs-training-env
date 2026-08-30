@@ -119,12 +119,34 @@ class ResidualTrainerGUI:
                                      state="disabled")
         self.pedal_entry.pack(side="left", padx=6)
 
-        # Row 4: deferred/dummy switches
+        # Row 4: surface + corner. Both key a calibration row, so the text here
+        # has to match what the reference runner was run with.
         row4 = ttk.Frame(self.training_tab)
         row4.pack(fill="x", **pad)
-        ttk.Checkbutton(row4, text="Turn angles (needs steering reward design)",
-                        state="disabled").pack(side="left")
-        ttk.Checkbutton(row4, text="Pedal patterns ramp/pump (V4)",
+        ttk.Label(row4, text="Tire grip:").pack(side="left")
+        self.grip_var = tk.StringVar(value="off")
+        ttk.Entry(row4, textvariable=self.grip_var, width=14).pack(side="left", padx=6)
+        ttk.Label(row4, text='off = stock  |  "0.6"  |  "0.5,0.75,1.0"  |  "0.4-1.0"'
+                  ).pack(side="left")
+
+        row4b = ttk.Frame(self.training_tab)
+        row4b.pack(fill="x", **pad)
+        ttk.Label(row4b, text="Corner radius:").pack(side="left")
+        self.corner_var = tk.StringVar(value="straight")
+        ttk.Entry(row4b, textvariable=self.corner_var, width=14).pack(side="left", padx=6)
+        ttk.Label(row4b, text='straight  |  "50"  |  "50L"  |  "50R"  (metres; '
+                  "needs a calibrated steering angle)").pack(side="left")
+
+        # Row 4c: reward preset
+        row4c = ttk.Frame(self.training_tab)
+        row4c.pack(fill="x", **pad)
+        ttk.Label(row4c, text="Reward:").pack(side="left")
+        self.reward_var = tk.StringVar(value="v5.0")
+        ttk.Combobox(row4c, textvariable=self.reward_var, width=14, state="readonly",
+                     values=["v5.0", "normalized"]).pack(side="left", padx=6)
+        ttk.Label(row4c, text="normalized = anchored on this config's measured "
+                  "slam/stock references").pack(side="left")
+        ttk.Checkbutton(row4c, text="Pedal patterns ramp/pump (V4)",
                         state="disabled").pack(side="left", padx=12)
 
         # Row 5: run name / resume / total steps
@@ -574,6 +596,9 @@ class ResidualTrainerGUI:
             run_name=self.run_name_var.get(),
             resume=self.resume_var.get(),
             vehicle_pc=getattr(self, "_resolved_vehicle_pc", None),
+            grip=self.grip_var.get(),
+            corner=self.corner_var.get(),
+            reward=self.reward_var.get(),
         )
         for key, var in self.field_vars.items():
             settings[key] = var.get()

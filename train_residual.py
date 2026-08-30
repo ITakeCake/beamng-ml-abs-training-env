@@ -40,6 +40,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 from residual_core import parse_speeds, parse_pedal_spec, parse_grip_spec
+from corner import parse_corner_spec
 from residual_log import setup_logging
 from sim_config import (
     SimConfig, load as load_sim_config, validate as validate_sim_config,
@@ -47,7 +48,7 @@ from sim_config import (
 )
 from compat import check_compat
 from reward_spec import RewardSpec, PRESETS
-from calibration import CalibrationTable, table_hash
+from calibration import CalibrationTable, config_key, table_hash
 
 FRAME_STACK = 16
 HEARTBEAT_STEPS = 2000
@@ -241,6 +242,30 @@ def make_venv(args):
             f"calibrate each, or train with --reward v5.0.")
     log.info("grip: %s", "stock (untouched)" if grip_spec is None else grip_spec)
 
+    corner_spec = parse_corner_spec(args.corner)
+    if corner_spec is not None:
+        # The angle is looked up per episode from the calibration row for that
+        # episode's (grip, speed, radius); with no table there is nothing to
+        # look up, and a corner with no angle brakes in a straight line.
+        if table is None or not table.steering:
+            raise SystemExit(
+                f"--corner {args.corner!r} needs a measured steering angle, and "
+                f"{calib_path or 'the calibration table'} has none.\n\n"
+                f"Run: python reference_runner.py --car <car> "
+                f'--corner {args.corner} --speeds "{args.speeds}"')
+        if spec.normalize:
+            missing = [config_key(grip=g, speed_mph=mph, radius_m=corner_spec.radius_m)
+                       for mph in parse_speeds(args.speeds)
+                       for g in (grip_spec.levels() or [] if grip_spec else [1.0])]
+            absent = [k for k in missing if k not in table.rows]
+            if absent:
+                raise SystemExit(
+                    f"--reward {args.reward} normalizes against measured references, "
+                    f"but these corner configs have no calibration row:\n  "
+                    + "\n  ".join(absent)
+                    + f"\n\nRun: python reference_runner.py --corner {args.corner}")
+    log.info("corner: %s", "straight" if corner_spec is None else corner_spec)
+
     def _make():
         pedal = parse_pedal_spec(args.pedal)
         env = ABSLearningEnvResidual(port=args.port, env_index=0,
@@ -248,7 +273,8 @@ def make_venv(args):
                                      pedal_range=pedal, reward_spec=spec,
                                      calibration_table=table,
                                      grip_spec=grip_spec,
-                                     grip_lead_seconds=args.grip_lead)
+                                     grip_lead_seconds=args.grip_lead,
+                                     corner_spec=corner_spec)
         env.fixed_mph = parse_speeds(args.speeds)
         return env
 
@@ -371,6 +397,10 @@ def parse_args():
                         '"0.6", a list "0.5,0.75,1.0" (randomized among them), or '
                         'a range "0.4-1.0" (continuous random; incompatible with '
                         '--reward normalized)')
+    p.add_argument("--corner", default="straight",
+                   help='brake in a constant-radius turn: radius in metres, '
+                        '"50" / "50L" / "50R". "straight" (default) = no corner. '
+                        "Requires a steering angle measured by reference_runner.")
     p.add_argument("--grip-lead", type=float, default=0.0,
                    help="apply the grip change this many seconds BEFORE brake "
                         "onset (0 = same physics tick, exact)")

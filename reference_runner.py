@@ -32,6 +32,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 from calibration import CalibrationTable, config_key, summarize, STRAIGHT
+from corner import (LEFT, STEERING_SEEK_MAX_ITERS, initial_steering_guess,
+                    parse_corner_spec, radius_from_yaw, steering_seek_converged,
+                    steering_seek_update)
 from residual_log import setup_logging, get_logger
 from sim_config import (
     SimConfig, load as load_sim_config, resolved_userpath, content_userpath,
@@ -51,6 +54,8 @@ ACCEL_OVERSHOOT_MPH = 2.0   # abs_env: accelerate to target+2, then coast in gea
 STOP_SPEED_MS = 0.05
 STOP_FRAMES = 15
 MAX_STOP_STEPS = 6000       # 30 s at 200 Hz -- a stop that long has gone wrong
+PROBE_STEPS = 600           # 3 s of steady-state cornering at 200 Hz
+PROBE_SETTLE_STEPS = 300    # first 1.5 s is turn-in transient, not a radius
 
 # The two reference cars: identical except for the ABS slot (verified by diffing
 # their parts blocks -- ESC and TC are empty in BOTH, so ABS is the only variable).
@@ -64,15 +69,16 @@ REFERENCE_CARS = {
 ABS_BEHAVIOR = {"slam": "off", "stock": "realistic"}
 
 
-def check_supported(grip, radius_m):
-    """Guard for dimensions the runner does not implement yet. Refusing loudly
+def check_supported(grip, radius_m, steering=None):
+    """Guard for dimensions the runner cannot measure honestly. Refusing loudly
     beats silently measuring a straight line and writing the result under a key
     that claims otherwise -- a wrong calibration row is worse than a missing
     one, because training will happily consume it."""
-    if radius_m is not STRAIGHT:
-        raise NotImplementedError(
-            f"radius_m={radius_m} needs the arc reference path (PLAN_V2 section 4); "
-            f"not implemented yet -- refusing rather than silently measuring a straight line.")
+    if radius_m is not STRAIGHT and steering is None:
+        raise ValueError(
+            f"radius_m={radius_m} was asked for with no steering angle -- the car "
+            f"would brake in a straight line and the result would be written under "
+            f"a key claiming a corner. Run the steering seek first.")
 
 
 def get_quat(x, y, z):
@@ -171,9 +177,15 @@ class ReferenceRunner:
                 shutil.copy2(src, veh_dir / pc)
         log.info("installed telemetry + reference cars -> %s", user_root)
 
-    def measure_stop(self, speed_mph, grip=1.0, radius_m=STRAIGHT, lead_seconds=0.0):
-        """One reference stop. Returns the standard 2 kHz brake-event result."""
-        check_supported(grip, radius_m)
+    def measure_stop(self, speed_mph, grip=1.0, radius_m=STRAIGHT, lead_seconds=0.0,
+                     steering=None):
+        """One reference stop. Returns the standard 2 kHz brake-event result.
+
+        `steering` is the signed open-loop angle for a corner (None = straight).
+        It goes on at the same moment training's CornerSteerInjector applies it
+        -- immediately after the slam is armed -- and is then left alone, since
+        vehicle.control only sends the inputs it is given."""
+        check_supported(grip, radius_m, steering)
 
         target_ms = speed_mph * 0.44704
         measure_target = target_ms - MEASURE_OFFSET_MS
@@ -229,6 +241,8 @@ class ReferenceRunner:
         if float(grip) != 1.0:
             self.vehicle.queue_lua_command(
                 f"extensions.abstelemetry.armGripChange({float(grip)}, {lead_seconds})")
+        if steering is not None:
+            self.vehicle.control(steering=float(steering))
         fired = False
         for _ in range(600):
             self.bng.step(20)
@@ -275,6 +289,8 @@ class ReferenceRunner:
             "reference": self.reference,
             "speed_mph": speed_mph,
             "grip": float(grip),
+            "radius_m": radius_m,
+            "steering": None if steering is None else float(steering),
             "grip_applied": float(e.get("tel_grip_mult", 1.0)),
             "grip_nodes": int(e.get("tel_grip_nodes", 0)),
             "stopped": stopped,
@@ -294,6 +310,95 @@ class ReferenceRunner:
                 f"the 2 kHz state machine never completed a measurement")
         return result
 
+    def probe_radius(self, speed_mph, steering, grip=1.0):
+        """Hold `steering` at roughly constant speed and read back the radius
+        the car actually describes: R = v / yaw_rate, averaged over the settled
+        half of the hold. No braking -- this measures geometry only.
+
+        Speed is held by a crude proportional throttle rather than a fixed
+        pedal: understeer scrubs speed off, and a car that is decelerating
+        through the sample gives a yaw rate that belongs to no single radius."""
+        target_ms = speed_mph * 0.44704
+
+        self.vehicle.teleport(pos=START_POS, rot_quat=self.start_quat, reset=True)
+        self.vehicle.focus()
+        self.vehicle.control(throttle=0, steering=0, gear=0, parkingbrake=0, brake=0)
+        self.vehicle.queue_lua_command("extensions.load('abstelemetry')")
+        self.vehicle.queue_lua_command("extensions.abstelemetry.releaseBrakes()")
+        self.vehicle.queue_lua_command("extensions.abstelemetry.restoreGrip()")
+        self.bng.step(15)
+        if float(grip) != 1.0:
+            # The probe must run on the surface the corner will be measured on:
+            # grip sets how far the car understeers, i.e. the whole answer.
+            self.vehicle.queue_lua_command(
+                f"extensions.abstelemetry.setGripMultiplier({float(grip)})")
+        self.bng.step(2)
+
+        self.bng.settings.set_nondeterministic()
+        self.bng.control.resume()
+        self.vehicle.control(gear=2, throttle=1.0, steering=0, brake=0)
+        deadline = time.monotonic() + 25.0
+        while time.monotonic() < deadline:
+            time.sleep(0.02)
+            self.vehicle.sensors.poll()
+            if self.vehicle.sensors["electrics"].get("airspeed", 0.0) >= target_ms:
+                break
+        else:
+            raise RuntimeError(f"probe never reached {target_ms:.2f} m/s in 25 s")
+
+        self.bng.control.pause()
+        self.bng.settings.set_deterministic(DETERM_HZ)
+        self.vehicle.control(steering=float(steering), throttle=0.0)
+
+        samples = []
+        for i in range(PROBE_STEPS):
+            self.bng.step(1)
+            self.vehicle.sensors.poll()
+            e = self.vehicle.sensors["electrics"]
+            spd = float(e.get("airspeed", 0.0))
+            self.vehicle.control(
+                throttle=min(1.0, max(0.0, 0.15 * (target_ms - spd))),
+                steering=float(steering))
+            if i >= PROBE_SETTLE_STEPS:
+                samples.append((spd, float(e.get("tel_yaw_rate_inst", 0.0))))
+
+        self.vehicle.control(throttle=0.0, steering=0.0, brake=1.0)
+        self.bng.step(5)
+        self.vehicle.control(brake=0.0)
+        self.vehicle.queue_lua_command("extensions.abstelemetry.restoreGrip()")
+
+        speeds = [s for s, _ in samples]
+        yaws = [y for _, y in samples]
+        mean_speed = sum(speeds) / len(speeds)
+        mean_yaw = sum(yaws) / len(yaws)
+        radius = radius_from_yaw(mean_speed, mean_yaw)
+        log.info("probe steering=%+.4f -> speed=%.2f m/s yaw=%.4f rad/s R=%s",
+                 steering, mean_speed, mean_yaw,
+                 "n/a" if radius is None else f"{radius:.1f} m")
+        return radius, mean_speed, mean_yaw
+
+    def seek_steering(self, speed_mph, radius_m, grip=1.0, direction=LEFT):
+        """Find the open-loop angle that holds `radius_m` at this speed and
+        grip. Iterative because the angle->radius map is not known a priori
+        (wheelbase, understeer, grip all move it) and is not linear near the
+        limit -- see corner.steering_seek_update for the damping."""
+        steering = initial_steering_guess(radius_m)
+        history = []
+        for _ in range(STEERING_SEEK_MAX_ITERS):
+            measured, _, _ = self.probe_radius(speed_mph, direction * steering, grip=grip)
+            history.append((steering, measured))
+            if steering_seek_converged(measured, radius_m):
+                log.info("steering seek converged: R=%.1fm steering=%+.4f "
+                         "(measured %.1fm, %d probes)", radius_m,
+                         direction * steering, measured, len(history))
+                return direction * steering, measured
+            steering = steering_seek_update(steering, measured, radius_m)
+        raise RuntimeError(
+            f"steering seek did not converge on R={radius_m} m at {speed_mph} mph "
+            f"grip={grip} after {STEERING_SEEK_MAX_ITERS} probes: {history}. "
+            f"The radius may be unreachable on this surface (the car understeers "
+            f"wide however far the wheel is turned).")
+
     def close(self):
         try:
             self.bng.close()
@@ -302,24 +407,51 @@ class ReferenceRunner:
 
 
 def run_calibration(sim_cfg, car, speeds, reps, grips=(1.0,), radius_m=STRAIGHT,
-                    out_dir=None, port=None, lead_seconds=0.0):
-    """Measures both references at every (speed, grip) and writes the table."""
+                    out_dir=None, port=None, lead_seconds=0.0, direction=LEFT):
+    """Measures both references at every (speed, grip) and writes the table.
+
+    For a corner, the steering angle is sought FIRST -- once per (speed, grip),
+    on the slam car -- and the same angle then drives every reference stop and,
+    later, every training episode on that row. One procedure for all three is
+    the only thing that makes "stock's advantage in this corner" mean what it
+    says."""
     out_dir = out_dir or os.path.join(HERE, "calibration")
     path = os.path.join(out_dir, f"{car}.json")
     table = CalibrationTable.load(path) if os.path.exists(path) else CalibrationTable(car=car)
+
+    if radius_m is not STRAIGHT:
+        seeker = ReferenceRunner(sim_cfg, "slam", port=port)
+        try:
+            for mph in speeds:
+                for grip in grips:
+                    key = config_key(grip=grip, speed_mph=mph, radius_m=radius_m)
+                    if key in table.steering:
+                        log.info("steering already known for %s: %+.4f", key,
+                                 table.steering[key]["steering"])
+                        continue
+                    signed, measured = seeker.seek_steering(mph, radius_m, grip=grip,
+                                                            direction=direction)
+                    table.put_steering(key, signed, measured)
+                    table.save(path)      # a seek costs minutes; never lose one
+        finally:
+            seeker.close()
+        time.sleep(2)
 
     for reference in ("slam", "stock"):
         runner = ReferenceRunner(sim_cfg, reference, port=port)
         try:
             for mph in speeds:
                 for grip in grips:
+                    key = config_key(grip=grip, speed_mph=mph, radius_m=radius_m)
+                    steering = (None if radius_m is STRAIGHT
+                                else table.steering_for(key))
                     values = []
                     for rep in range(reps):
                         r = runner.measure_stop(mph, grip=grip, radius_m=radius_m,
-                                                lead_seconds=lead_seconds)
+                                                lead_seconds=lead_seconds,
+                                                steering=steering)
                         values.append(r["avg_g_arc"])
                         time.sleep(0.5)
-                    key = config_key(grip=grip, speed_mph=mph, radius_m=radius_m)
                     table.put(key, reference, summarize(values))
                     log.info("calibrated %s %s: %s", reference, key, summarize(values))
         finally:
@@ -348,6 +480,9 @@ def parse_args():
     p.add_argument("--grip-lead", type=float, default=0.0,
                    help="apply grip this many seconds before brake onset "
                         "(0 = same physics tick); must match training")
+    p.add_argument("--corner", default="straight",
+                   help='corner radius in metres, "50" / "50L" / "50R"; '
+                        '"straight" (default) = no corner')
     p.add_argument("--force", action="store_true",
                    help="proceed even if beamngpy doesn't match the detected game version")
     return p.parse_args()
@@ -376,7 +511,10 @@ def main():
 
     speeds = [int(s.strip()) for s in args.speeds.split(",") if s.strip()]
     grips = [round(float(g.strip()), 3) for g in args.grips.split(",") if g.strip()]
+    corner = parse_corner_spec(args.corner)
     table, path = run_calibration(cfg, args.car, speeds, args.reps, grips=grips,
+                                  radius_m=STRAIGHT if corner is None else corner.radius_m,
+                                  direction=LEFT if corner is None else corner.direction,
                                   port=args.port, lead_seconds=args.grip_lead)
 
     print("\n--- CALIBRATION ---")
@@ -385,8 +523,10 @@ def main():
         slam = row.get("slam", {}).get("median")
         stock = row.get("stock", {}).get("median")
         if slam is not None and stock is not None:
+            steer = table.steering.get(key, {}).get("steering")
+            extra = "" if steer is None else f" steering={steer:+.4f}"
             print(f"{key}: slam={slam:.4f}g stock={stock:.4f}g "
-                  f"gap={stock - slam:+.4f}g")
+                  f"gap={stock - slam:+.4f}g{extra}")
     print(f"\nwrote {path}")
 
 
