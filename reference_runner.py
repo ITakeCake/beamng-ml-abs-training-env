@@ -33,7 +33,8 @@ sys.path.insert(0, HERE)
 
 from calibration import CalibrationTable, config_key, summarize, STRAIGHT
 from corner import (LEFT, STEERING_SEEK_MAX_ITERS, initial_steering_guess,
-                    parse_corner_spec, radius_from_yaw, steering_seek_converged,
+                    lateral_g_for_radius, parse_corner_spec, radius_for_lateral_g,
+                    radius_from_yaw, seek_is_saturated, steering_seek_converged,
                     steering_seek_update)
 from residual_log import setup_logging, get_logger
 from sim_config import (
@@ -398,6 +399,21 @@ class ReferenceRunner:
                     f"yaw-rate sign conventions disagree; every corner would be "
                     f"driven against its own yaw target.")
             history.append((steering, measured))
+            if seek_is_saturated(history):
+                best_steer, best_r = min(history, key=lambda h: h[1])
+                speed_ms = speed_mph * 0.44704
+                raise RuntimeError(
+                    f"R={radius_m} m is unreachable for this car at {speed_mph} mph "
+                    f"on grip={grip}: more steering stopped buying radius at "
+                    f"{best_r:.1f} m (steering {best_steer:+.4f}), which is already "
+                    f"{lateral_g_for_radius(speed_ms, best_r):.2f} g of lateral load. "
+                    f"R={radius_m} m would need "
+                    f"{lateral_g_for_radius(speed_ms, radius_m):.2f} g.\n\n"
+                    f"Pick a corner by grip budget instead -- braking in a turn only "
+                    f"tests ABS if there is grip left to brake with. At {speed_mph} "
+                    f"mph: {radius_for_lateral_g(speed_ms, 0.3):.0f} m = 0.3 g, "
+                    f"{radius_for_lateral_g(speed_ms, 0.4):.0f} m = 0.4 g, "
+                    f"{radius_for_lateral_g(speed_ms, 0.5):.0f} m = 0.5 g lateral.")
             if steering_seek_converged(measured, radius_m):
                 log.info("steering seek converged: R=%.1fm steering=%+.4f "
                          "(measured %.1fm, %d probes)", radius_m,

@@ -273,3 +273,62 @@ def test_convergence_tolerance_is_tight_enough_to_matter():
 def test_initial_guess_is_tighter_steering_for_tighter_corners():
     assert initial_steering_guess(25.0) > initial_steering_guess(100.0)
     assert 0.0 < initial_steering_guess(50.0) <= STEERING_MAX
+
+
+# ------------------------------------------------- picking a corner by grip
+def test_radius_and_lateral_g_round_trip():
+    from corner import lateral_g_for_radius, radius_for_lateral_g
+    r = radius_for_lateral_g(26.8, 0.4)
+    assert lateral_g_for_radius(26.8, r) == pytest.approx(0.4)
+
+
+def test_a_measured_saturation_matches_the_cars_lateral_limit():
+    """The live seek saturated at ~64 m at 60 mph (etk800, dry). That is 1.04 g
+    lateral -- the same limit its straight-line slam produces longitudinally,
+    which is what saturation SHOULD mean."""
+    from corner import lateral_g_for_radius
+    assert lateral_g_for_radius(25.5, 63.7) == pytest.approx(1.04, abs=0.02)
+
+
+def test_a_braking_corner_leaves_grip_to_brake_with():
+    """0.4 g lateral at 60 mph is a ~150 m radius, not 50."""
+    from corner import radius_for_lateral_g
+    assert radius_for_lateral_g(26.8, 0.4) == pytest.approx(183, abs=5)
+    assert radius_for_lateral_g(26.8, 0.5) == pytest.approx(146, abs=5)
+
+
+# ------------------------------------------------------ seek saturation
+def test_saturation_is_not_called_before_there_is_evidence():
+    from corner import seek_is_saturated
+    assert not seek_is_saturated([(0.1, 89.2)])
+    assert not seek_is_saturated([(0.1, 89.2), (0.18, 71.5)])
+
+
+def test_saturation_is_not_called_while_radius_is_still_falling():
+    from corner import seek_is_saturated
+    assert not seek_is_saturated([(0.1, 89.2), (0.18, 71.5), (0.24, 66.3)])
+
+
+def test_the_live_etk800_seek_is_detected_as_saturated():
+    """The real probe history from 2026-08-29. Detection must fire before the
+    8-probe ceiling -- the remaining probes cost minutes and cannot succeed."""
+    from corner import seek_is_saturated
+    history = [(0.1077, 89.23), (0.1753, 71.49), (0.2356, 66.34),
+               (0.2972, 63.74), (0.3625, 63.99), (0.4436, 63.76),
+               (0.5413, 64.09), (0.6633, 66.76)]
+    fired = next(i for i in range(1, len(history) + 1)
+                 if seek_is_saturated(history[:i]))
+    assert fired <= 5                     # caught within 5 probes, not 8
+    assert min(r for _, r in history[:fired]) == pytest.approx(63.74, abs=0.1)
+
+
+def test_a_converging_seek_is_never_called_saturated():
+    from corner import seek_is_saturated, initial_steering_guess, steering_seek_update
+    target, steering, history = 150.0, initial_steering_guess(150.0), []
+    for _ in range(10):
+        measured = 20.0 / steering        # toy plant, no limit
+        history.append((steering, measured))
+        assert not seek_is_saturated(history)
+        if steering_seek_converged(measured, target):
+            break
+        steering = steering_seek_update(steering, measured, target)

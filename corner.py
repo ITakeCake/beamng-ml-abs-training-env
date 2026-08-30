@@ -189,6 +189,36 @@ def parse_corner_spec(text):
     return CornerSpec(radius, direction)
 
 
+def radius_for_lateral_g(speed_ms, lateral_g):
+    """The radius that loads the tires to `lateral_g` at this speed.
+
+    How a corner should be chosen. Braking in a turn is only a test of ABS if
+    there is grip left to brake with: at the cornering limit the tires are
+    already saturated laterally and no brake force is available at all. Real
+    braking-in-a-turn procedures corner at a fraction of the limit (~0.4 g) for
+    exactly this reason."""
+    return (float(speed_ms) ** 2) / (float(lateral_g) * 9.81)
+
+
+def lateral_g_for_radius(speed_ms, radius_m):
+    """v^2/R in g. What a given corner actually asks of the tires."""
+    return (float(speed_ms) ** 2) / (float(radius_m) * 9.81)
+
+
+def seek_is_saturated(history, tol=0.02):
+    """True when more steering has stopped buying radius -- the car is
+    understeering at its lateral limit, so the target is unreachable however
+    far the wheel is turned. Detected rather than waited out: the remaining
+    probes cost minutes and cannot succeed, and the smallest radius reached so
+    far is the useful answer to report back."""
+    if len(history) < 3:
+        return False
+    (_, r_prev), (_, r_last) = history[-2], history[-1]
+    best = min(r for _, r in history)
+    # radius no longer improving, and the last probe is not the best one
+    return r_last >= r_prev * (1.0 - tol) and r_last > best * (1.0 - tol)
+
+
 def steering_seek_update(steering, measured_radius, target_radius,
                          gain=STEERING_SEEK_GAIN):
     """Next angle to try. Radius falls as steering rises, so an angle that came
