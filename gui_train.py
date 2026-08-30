@@ -10,6 +10,7 @@ from tkinter import filedialog, messagebox, ttk
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import gui_help
 from gui_cmd import (build_cmd, build_calibration_cmd, validate_settings,
                      validate_calibration_settings)
 from residual_log import setup_logging, tail_lines
@@ -94,6 +95,7 @@ class ResidualTrainerGUI:
                                 state="readonly", width=8)
         algo_box.pack(side="left", padx=6)
         algo_box.bind("<<ComboboxSelected>>", lambda e: self._swap_algo_panel())
+        gui_help.attach(algo_box, None, "algo")
 
         self.algo_panel = ttk.Frame(self.training_tab)
         self.algo_panel.pack(fill="x", **pad)
@@ -104,7 +106,9 @@ class ResidualTrainerGUI:
         row2.pack(fill="x", **pad)
         ttk.Label(row2, text="Speeds (mph, comma-separated):").pack(side="left")
         self.speeds_var = tk.StringVar(value="60")
-        ttk.Entry(row2, textvariable=self.speeds_var, width=20).pack(side="left", padx=6)
+        e = ttk.Entry(row2, textvariable=self.speeds_var, width=20)
+        e.pack(side="left", padx=6)
+        gui_help.attach(e, None, "speeds")
         ttk.Label(row2, text="(map is set in the Simulator tab)").pack(side="left", padx=12)
 
         self._build_car_picker(pad)
@@ -113,12 +117,15 @@ class ResidualTrainerGUI:
         row3 = ttk.Frame(self.training_tab)
         row3.pack(fill="x", **pad)
         self.pedal_random_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(row3, text="Randomize pedal", variable=self.pedal_random_var,
-                        command=self._toggle_pedal_entry).pack(side="left")
+        cb = ttk.Checkbutton(row3, text="Randomize pedal", variable=self.pedal_random_var,
+                             command=self._toggle_pedal_entry)
+        cb.pack(side="left")
+        gui_help.attach(cb, None, "pedal_random")
         self.pedal_spec_var = tk.StringVar(value="0.4-1.0")
         self.pedal_entry = ttk.Entry(row3, textvariable=self.pedal_spec_var, width=12,
                                      state="disabled")
         self.pedal_entry.pack(side="left", padx=6)
+        gui_help.attach(self.pedal_entry, None, "pedal_spec")
 
         # Row 4: surface + corner. Both key a calibration row, so the text here
         # has to match what the reference runner was run with.
@@ -126,7 +133,9 @@ class ResidualTrainerGUI:
         row4.pack(fill="x", **pad)
         ttk.Label(row4, text="Tire grip:").pack(side="left")
         self.grip_var = tk.StringVar(value="off")
-        ttk.Entry(row4, textvariable=self.grip_var, width=14).pack(side="left", padx=6)
+        e = ttk.Entry(row4, textvariable=self.grip_var, width=14)
+        e.pack(side="left", padx=6)
+        gui_help.attach(e, None, "grip")
         ttk.Label(row4, text='off = stock  |  "0.6"  |  "0.5,0.75,1.0"  |  "0.4-1.0"'
                   ).pack(side="left")
 
@@ -134,7 +143,9 @@ class ResidualTrainerGUI:
         row4b.pack(fill="x", **pad)
         ttk.Label(row4b, text="Corner radius:").pack(side="left")
         self.corner_var = tk.StringVar(value="straight")
-        ttk.Entry(row4b, textvariable=self.corner_var, width=14).pack(side="left", padx=6)
+        e = ttk.Entry(row4b, textvariable=self.corner_var, width=14)
+        e.pack(side="left", padx=6)
+        gui_help.attach(e, None, "corner")
         ttk.Label(row4b, text='straight  |  "50"  |  "50L"  |  "50R"  (metres; '
                   "needs a calibrated steering angle)").pack(side="left")
 
@@ -143,8 +154,10 @@ class ResidualTrainerGUI:
         row4c.pack(fill="x", **pad)
         ttk.Label(row4c, text="Reward:").pack(side="left")
         self.reward_var = tk.StringVar(value="v5.0")
-        ttk.Combobox(row4c, textvariable=self.reward_var, width=14, state="readonly",
-                     values=["v5.0", "normalized"]).pack(side="left", padx=6)
+        cbo = ttk.Combobox(row4c, textvariable=self.reward_var, width=14, state="readonly",
+                           values=["v5.0", "normalized"])
+        cbo.pack(side="left", padx=6)
+        gui_help.attach(cbo, None, "reward")
         ttk.Label(row4c, text="normalized = anchored on this config's measured "
                   "slam/stock references").pack(side="left")
         ttk.Checkbutton(row4c, text="Pedal patterns ramp/pump (V4)",
@@ -155,12 +168,18 @@ class ResidualTrainerGUI:
         row5.pack(fill="x", **pad)
         ttk.Label(row5, text="Run name:").pack(side="left")
         self.run_name_var = tk.StringVar(value="residual_run1")
-        ttk.Entry(row5, textvariable=self.run_name_var, width=20).pack(side="left", padx=6)
+        e = ttk.Entry(row5, textvariable=self.run_name_var, width=20)
+        e.pack(side="left", padx=6)
+        gui_help.attach(e, None, "run_name")
         ttk.Label(row5, text="Total steps:").pack(side="left", padx=(12, 0))
         self.total_steps_var = tk.StringVar(value="200000")
-        ttk.Entry(row5, textvariable=self.total_steps_var, width=10).pack(side="left", padx=6)
+        e = ttk.Entry(row5, textvariable=self.total_steps_var, width=10)
+        e.pack(side="left", padx=6)
+        gui_help.attach(e, None, "total_steps")
         self.resume_var = tk.StringVar(value="")
-        ttk.Button(row5, text="Resume from...", command=self._pick_resume).pack(side="left", padx=(12, 0))
+        b = ttk.Button(row5, text="Resume from...", command=self._pick_resume)
+        b.pack(side="left", padx=(12, 0))
+        gui_help.attach(b, None, "resume")
         self.resume_label = ttk.Label(row5, text="(none)")
         self.resume_label.pack(side="left", padx=6)
 
@@ -575,9 +594,16 @@ class ResidualTrainerGUI:
         for key, default in defaults.items():
             frame = ttk.Frame(self.algo_panel)
             frame.pack(side="left", padx=4)
-            ttk.Label(frame, text=labels[key] + ":").pack(side="top")
+            algo = self.algo_var.get()
+            lbl = ttk.Label(frame, text=labels[key] + ":")
+            lbl.pack(side="top")
             var = tk.StringVar(value=str(default))
-            ttk.Entry(frame, textvariable=var, width=10).pack(side="top")
+            entry = ttk.Entry(frame, textvariable=var, width=10)
+            entry.pack(side="top")
+            # Both label and box: the label is the wider target, and it is what
+            # a reader hovers when the NAME is the confusing part ("tau").
+            gui_help.attach(lbl, algo, key)
+            gui_help.attach(entry, algo, key)
             self.field_vars[key] = var
 
     def _toggle_pedal_entry(self):
