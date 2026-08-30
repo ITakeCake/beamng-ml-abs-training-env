@@ -255,3 +255,50 @@ def test_the_trainer_accepts_both_flags():
         assert '"--train-speed-factor"' in src
         assert "deterministic=args.deterministic" in src
         assert "train_speed_factor=args.train_speed_factor" in src
+
+
+# ------------------------------------------ silencing survives a reset
+def test_silencing_survives_beamngpy_reconfiguring_itself(tmp_path):
+    """BeamNGpy configures its own logging when it is CONSTRUCTED, long after
+    setup_logging() ran, which resets whatever level was set beforehand. This
+    was observed live: PPO-07 still logged 'Teleporting vehicle' at INFO. The
+    handler filter is what actually holds."""
+    import logging
+    import residual_log
+    p = tmp_path / "t.log"
+    residual_log.setup_logging(str(p), "test", console=False)
+    lg = logging.getLogger("beamngpy.BeamNGpy")
+    lg.setLevel(logging.DEBUG)                       # what beamngpy does
+    lg.info("Advancing the simulation by 1 steps.")
+    lg.warning("connection lost")
+    logging.getLogger("residual.trainer").info("episode 1 STOP")
+    for h in logging.getLogger().handlers:
+        h.flush()
+    text = p.read_text(encoding="utf-8")
+    assert "Advancing" not in text
+    assert "connection lost" in text                 # real problems survive
+    assert "episode 1 STOP" in text                  # trainer untouched
+
+
+def test_the_filter_is_not_added_twice():
+    """setup_logging is idempotent and gets called more than once."""
+    import logging
+    import residual_log
+    residual_log.quiet_beamngpy()
+    residual_log.quiet_beamngpy()
+    for h in logging.getLogger().handlers:
+        n = sum(1 for f in h.filters
+                if isinstance(f, residual_log._QuietBeamngpy))
+        assert n <= 1
+
+
+# ------------------------------------------------ the mirror keeps up
+def test_the_episode_mirror_follows_episodes_not_a_step_count():
+    """At ~1084 steps/episode, mirroring every 500 steps was twice an episode.
+    Free-running episodes are ~50 steps, so the same 500 meant the per-run file
+    did not exist until episode 10 -- the monitor read as frozen because there
+    was nothing to read."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "train_residual.py"), encoding="utf-8").read()
+    assert 'dones = self.locals.get("dones")' in src
+    assert "every_n_steps=50" in src

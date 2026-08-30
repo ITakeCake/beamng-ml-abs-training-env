@@ -37,18 +37,41 @@ BEAMNGPY_LOGGERS = ("beamngpy", "beamngpy.BeamNGpy", "beamngpy.Vehicle",
                     "beamngpy.Scenario", "beamngpy.Camera", "beamngpy.Sensor")
 
 
+class _QuietBeamngpy(logging.Filter):
+    """Drops beamngpy records below `level`, at the HANDLER.
+
+    Setting the level on beamngpy's loggers is not enough and was observed not
+    to work: BeamNGpy configures its own logging when it is constructed, which
+    happens long after setup_logging() runs, and that resets whatever level was
+    set beforehand. A filter on the handler cannot be undone that way, because
+    the library never sees the handler.
+
+    Matching on the record's name prefix rather than a fixed list also catches
+    the loggers beamngpy creates that are not named here.
+    """
+
+    def __init__(self, level=logging.WARNING):
+        super().__init__()
+        self.level = level
+
+    def filter(self, record):
+        if record.name == "beamngpy" or record.name.startswith("beamngpy."):
+            return record.levelno >= self.level
+        return True
+
+
 def quiet_beamngpy(level=logging.WARNING):
-    """Raise beamngpy's log level so per-step chatter stops reaching handlers.
+    """Stop beamngpy's per-step chatter from reaching the log.
 
     WARNING keeps connection failures and genuine problems visible; only the
-    routine step/poll narration is dropped. Called for its side effect on the
-    named loggers rather than the root, so the trainer's own INFO lines are
-    untouched."""
+    routine step/poll narration is dropped. Applied both as a logger level (so
+    the cost is skipped early when it works) and as a handler filter (so it
+    still works when beamngpy resets those levels underneath us)."""
     for name in BEAMNGPY_LOGGERS:
-        lg = logging.getLogger(name)
-        lg.setLevel(level)
-        # propagate stays on: the records that DO pass the level filter should
-        # still reach the run's file handler.
+        logging.getLogger(name).setLevel(level)
+    for h in logging.getLogger().handlers:
+        if not any(isinstance(f, _QuietBeamngpy) for f in h.filters):
+            h.addFilter(_QuietBeamngpy(level))
     return level
 
 

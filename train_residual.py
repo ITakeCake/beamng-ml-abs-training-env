@@ -137,7 +137,13 @@ class LogMirrorCallback(BaseCallback):
     (a whole-file copy would leak every prior run's/probe's episodes into this
     run's count and "best avg_g", which the monitor treats as ground truth)."""
 
-    def __init__(self, src_path, dst_path, skip_lines=0, every_n_steps=500, verbose=0):
+    # 500 steps was ~half an episode when an episode was ~1084 steps. Under
+    # free-running an episode is nearer 50, so 500 meant the per-run file did
+    # not appear until episode 10 and then jumped ten at a time -- the monitor
+    # looked frozen because there was genuinely nothing to read. Mirroring on
+    # episode end makes the cadence follow episodes rather than a step count
+    # that no longer means the same thing in both modes.
+    def __init__(self, src_path, dst_path, skip_lines=0, every_n_steps=50, verbose=0):
         super().__init__(verbose)
         self.src_path = src_path
         self.dst_path = dst_path
@@ -146,7 +152,14 @@ class LogMirrorCallback(BaseCallback):
         self._next = every_n_steps
 
     def _on_step(self):
-        if self.num_timesteps >= self._next:
+        # An episode just ended => a row was just appended => mirror it now.
+        # locals["dones"] is the vec-env flag SB3 already has in hand, so this
+        # costs a dict lookup rather than a stat() on every step.
+        dones = self.locals.get("dones")
+        if dones is not None and any(bool(d) for d in dones):
+            self._next = self.num_timesteps + self.every_n
+            self._mirror()
+        elif self.num_timesteps >= self._next:
             self._next += self.every_n
             self._mirror()
         return True
