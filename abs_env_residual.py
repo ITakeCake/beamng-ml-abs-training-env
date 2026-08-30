@@ -35,7 +35,7 @@ import abs_env
 import abs_env_incar
 from abs_env_incar import ABSLearningEnvIncar, MAX_EPISODE_STEPS
 from residual_core import residual_to_brakes
-from residual_log import get_logger, StepRingBuffer
+from residual_log import get_logger, StepRingBuffer, YawTrace
 from sim_config import SimConfig, resolved_userpath
 from calibration import config_key
 from corner import HeadingTracker, arc_radians, heading_branch_is_safe
@@ -316,6 +316,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         self.observation_space = gym.spaces.Box(low=low, high=high, dtype=np.float32)
         self.action_space = gym.spaces.Box(0.0, 1.0, shape=(2,), dtype=np.float32)
         self._ring = StepRingBuffer(STEP_RING_CAPACITY)
+        self._yaw_trace = YawTrace()
         self._ep_rel_sum = np.zeros(2)
         self._ep_rel_max = np.zeros(2)
         self._ep_t0 = 0.0
@@ -384,6 +385,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # `grip` stays 1.0 when no spec was given -- "stock", never touched.
         self.grip = self._draw_grip()
         self._ring.clear()
+        self._yaw_trace.clear()
         self._ep_rel_sum[:] = 0.0
         self._ep_rel_max[:] = 0.0
         t0 = time.monotonic()
@@ -463,6 +465,8 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # exhausts the entire terminal yaw budget and triggers the catastrophic
         # backstop on every corner episode.
         self._corner_speed = self.start_speed_ms
+        self._entry_yaw_target = 0.0
+        self._entry_yaw_actual = None    # filled on the first step
         if self._corner is None:
             return
         arc = arc_radians(self.start_speed_ms, self._corner.radius_m,
@@ -478,6 +482,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # _corner_steering(), NOT the spec's own signed_steering: the angle
         # usually lives in the calibration table, and the spec property raises
         # when the spec itself has none.
+        self._entry_yaw_target = self._corner.yaw_target(self.start_speed_ms)
         log.info("corner: R=%.1fm dir=%s steering=%+.3f arc=%.2frad "
                  "entry_yaw_target=%.3frad/s", self._corner.radius_m,
                  "L" if self._corner.direction > 0 else "R",
@@ -521,6 +526,13 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # filled in _last_gps_speed for this step.
         self._heading.observe(self.current_heading)
         self._corner_speed = self._last_gps_speed
+        # obs[6] is yaw_avg, the exact channel abs_env_incar's reward reads, and
+        # target_yaw_rate is what it compared against on THIS step -- so the
+        # trace decomposes the same number the reward gated on, not a lookalike.
+        yaw_error = float(obs[6]) - self.target_yaw_rate
+        self._yaw_trace.push(yaw_error, self._dt)
+        if self._entry_yaw_actual is None:
+            self._entry_yaw_actual = float(obs[6])
 
         rel = np.clip(np.asarray(action, dtype=np.float64)[:2], 0.0, 1.0)
         self._ep_rel_sum += rel
@@ -549,6 +561,17 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         else:
             log.warning(msg, *args)
             self._dump_ring(outcome)
+        if self._corner is not None:
+            # Turn-in check: how much of the demanded rotation the car had
+            # actually reached by the first braking step. Well under 1.0 means
+            # the wheel went on too late for the turn to establish, and the
+            # yaw-error integral is measuring the procedure, not the controller.
+            entry = self._entry_yaw_actual or 0.0
+            frac = (entry / self._entry_yaw_target) if self._entry_yaw_target else 0.0
+            log.info("episode %d yaw trace: %s | entry_yaw actual=%.3f "
+                     "target=%.3f (%.0f%% established)", self.episode_count,
+                     self._yaw_trace.summary(), entry, self._entry_yaw_target,
+                     frac * 100.0)
 
     def _dump_ring(self, why):
         rows = self._ring.dump()

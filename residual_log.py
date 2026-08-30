@@ -105,3 +105,75 @@ class StepRingBuffer:
 
     def clear(self):
         self._buf.clear()
+
+
+class YawTrace:
+    """Where an episode's yaw-error integral actually comes from.
+
+    The terminal yaw bonus is a cliff at 0.1 rad of accumulated |yaw error|,
+    and corner episodes land right on it (median 0.092, live 2026-08-29). Two
+    very different causes produce that same number, and the total cannot tell
+    them apart: error concentrated in the first fraction of a second (the car
+    still turning in when the brakes hit, which is a PROCEDURE problem) versus
+    error spread evenly across the stop (the threshold is genuinely too tight
+    for a corner, which is a CONSTANT problem). Only one of those is fixed by
+    changing 0.1.
+
+    So the integral is accumulated into fixed-width time buckets as well as in
+    total, and the head of the episode is measured separately. Nothing here
+    decides anything -- it reports, so the decision has evidence under it."""
+
+    BUCKET_S = 0.5
+    HEAD_S = 0.5          # "turn-in transient" window, from brake onset
+
+    def __init__(self, bucket_s=BUCKET_S, head_s=HEAD_S):
+        self.bucket_s = float(bucket_s)
+        self.head_s = float(head_s)
+        self.buckets = []          # integral of |yaw error| dt, per bucket
+        self.total = 0.0
+        self.head = 0.0            # integral over the first head_s seconds
+        self.peak_error = 0.0
+        self.peak_t = 0.0
+        self.n = 0                 # steps pushed
+        self.dt = 0.0              # step size, from the first push
+
+    @property
+    def t(self):
+        """Elapsed episode time. Derived from an exact step COUNT rather than
+        accumulated by `t += dt`: at 200 Hz over a 5 s stop the accumulated
+        version drifts enough to move samples across bucket edges, which shows
+        up as buckets of 100 and 102 samples in an episode of constant error."""
+        return self.n * self.dt
+
+    def push(self, yaw_error, dt):
+        e = abs(float(yaw_error))
+        self.dt = float(dt)
+        t = self.t
+        contrib = e * self.dt
+        idx = int(t / self.bucket_s)
+        while len(self.buckets) <= idx:
+            self.buckets.append(0.0)
+        self.buckets[idx] += contrib
+        self.total += contrib
+        if t < self.head_s:
+            self.head += contrib
+        if e > self.peak_error:
+            self.peak_error, self.peak_t = e, t
+        self.n += 1
+
+    @property
+    def head_fraction(self):
+        """Share of the whole integral spent in the first head_s seconds. High
+        (say >0.4 for a 5 s stop, where an even spread would give ~0.1) means
+        turn-in transient dominates and the threshold is not the problem."""
+        return 0.0 if self.total <= 0.0 else self.head / self.total
+
+    def summary(self):
+        """One line: total, where it came from, and the per-bucket shape."""
+        shape = " ".join(f"{b:.3f}" for b in self.buckets)
+        return (f"total={self.total:.4f} head({self.head_s:g}s)={self.head:.4f} "
+                f"({self.head_fraction * 100:.0f}%) peak={self.peak_error:.3f}rad/s"
+                f"@{self.peak_t:.2f}s per{self.bucket_s:g}s=[{shape}]")
+
+    def clear(self):
+        self.__init__(self.bucket_s, self.head_s)
