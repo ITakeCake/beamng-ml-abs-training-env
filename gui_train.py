@@ -835,7 +835,11 @@ class ResidualTrainerGUI:
             messagebox.showerror("Invalid settings", "\n".join(problems))
             return
 
-        model = self._car_model_by_display.get(self.car_model_var.get())
+        model_info = self._car_model_by_display.get(self.car_model_var.get())
+        # .name, not the ModelInfo itself: this becomes --car, which becomes the
+        # output filename calibration/<car>.json, which is what training looks
+        # up. Interpolating the object writes a file nothing will ever read.
+        model = model_info.name if model_info else None
         if not model:
             log.warning("CALIBRATE refused: no car model selected")
             messagebox.showerror(
@@ -995,14 +999,14 @@ class ResidualTrainerGUI:
             return
         try:
             with open(st["log_path"], encoding="utf-8", errors="ignore") as fh:
-                fh.seek(st["mark"])
                 text = fh.read()
         except OSError:
             text = ""
-        # whole_file: `text` is already only this run's slice (seeked past the
-        # mark taken at launch), so re-trimming would drop its start.
-        prog = calprog.parse_progress(text, total_stops=st["planned"],
-                                      whole_file=True)
+        # Read the whole file and let parse_progress find the last run marker,
+        # rather than seeking to a byte offset captured at launch: the runner's
+        # log handler may truncate or reopen the file, which leaves that offset
+        # pointing past everything since written and freezes the bar at "1 of N".
+        prog = calprog.parse_progress(text, total_stops=st["planned"])
         st["bar"]["value"] = prog["stops_done"]
         st["status"].set(calprog.describe(prog))
         if prog["seconds_per_stop"]:

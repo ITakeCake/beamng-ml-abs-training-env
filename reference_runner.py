@@ -173,7 +173,8 @@ class ReferenceRunner:
         if "OK" not in str(status):
             raise RuntimeError(f"abstelemetry failed to initialize: {status}")
 
-    def _await_live_result(self, speed_mph, grip, pedal, radius_m, steering):
+    def _await_live_result(self, speed_mph, grip, pedal, radius_m, steering,
+                           prev_g=0.0):
         """Free-running measurement: wait for Lua to publish a completed brake
         event, then read it. No stepping, no per-step round trips."""
         # The Lua latch decides the exact TICK the pedal goes down, but
@@ -190,18 +191,25 @@ class ReferenceRunner:
         while time.monotonic() < deadline:
             time.sleep(0.05)
             self.vehicle.sensors.poll()
-            spd = float(self.vehicle.sensors["electrics"].get("tel_inst_speed", 999.0))
+            e = self.vehicle.sensors["electrics"]
+            spd = float(e.get("tel_inst_speed", 999.0))
             if not neutral_dropped and spd < 1.118:      # 2.5 mph, as stepped mode
                 self.vehicle.control(brake=float(pedal), gear=0)
                 neutral_dropped = True
-            e = self.vehicle.sensors["electrics"]
-            result_g = float(e.get("tel_last_brake_avg_g_arc", 0.0))
-            if result_g > 0.0:
+            g = float(e.get("tel_last_brake_avg_g_arc", 0.0))
+            # A NEW value, not merely a non-zero one: this channel holds the
+            # PREVIOUS stop's result until the next event completes, so
+            # "g > 0" is already true the instant stop 2 begins.
+            if g > 0.0 and g != prev_g:
+                result_g = g
                 break
 
         self.vehicle.queue_lua_command("extensions.abstelemetry.disarmBrakeSlam()")
         self.vehicle.control(brake=0.0, throttle=0.0)
-        self._set_speed_factor(-1)          # back to stepped for the next stop
+        # Leave the engine at normal speed but do NOT restore stepping: the
+        # next stop's run-up resumes and re-applies its own factor, so pausing
+        # here only costs a round trip.
+        self._set_speed_factor(0)
         self.bng.control.pause()
         self.bng.settings.set_deterministic(DETERM_HZ)
         self.bng.step(5)
@@ -387,7 +395,11 @@ class ReferenceRunner:
             # the finished result, which Lua publishes as tel_last_brake_avg_g_arc
             # when the event completes. So wait for that, and let the game get on
             # with it.
-            return self._await_live_result(speed_mph, grip, pedal, radius_m, steering)
+            self.vehicle.sensors.poll()
+            prev_g = float(self.vehicle.sensors["electrics"]
+                           .get("tel_last_brake_avg_g_arc", 0.0))
+            return self._await_live_result(speed_mph, grip, pedal, radius_m,
+                                           steering, prev_g)
 
         # In stepped mode the pedal is re-sent every step: the game's ~60 Hz
         # input update otherwise writes input.brake back down, fighting the
