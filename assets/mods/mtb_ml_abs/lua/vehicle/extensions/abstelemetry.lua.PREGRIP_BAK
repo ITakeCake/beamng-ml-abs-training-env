@@ -3,17 +3,6 @@
 --  measured steering [electrics.steering, Dynamic_ABS parity]. Gyro pitch/roll
 --  estimate exists but is DEBUG-ONLY — obs pitch/roll are ground truth, reverted 2026-07-11)
 --
--- ResidualABS-local copy: rebuilt 2026-08-27 on the PPO_V3_AxleCurriculum v3.4-ppo_v2
--- base (the copy the live .tech userpath has run since 07-11) + the arc-length brake
--- metric. An earlier rebuild used the older MachineTrainerBoy base and silently lost
--- the armBrakeSlam/reorderWheelDataLogical machinery abs_env_incar.py requires
--- (parked as abstelemetry_SACBASE_BAK.lua). Auto-deployed to the userpath by
--- abs_env.py's _install_tech_assets() on every launch from this folder; other
--- training folders carry their own copies and are unaffected by this one.
--- Arc fields (last_brake_avg_g_arc / last_brake_dist_arc) are telemetry-only —
--- not wired into any reward — and unverified live until an env from this folder
--- launches and logs a stop.
---
 -- *** IMPORTANT: This file is the source of truth. ***
 -- *** Python/ML code must adapt to this Lua, not the other way around. ***
 -- *** Do not modify this file to accommodate Python-side changes. ***
@@ -107,19 +96,10 @@ local brakeTargetSpeed = 0     -- m/s, set by Python via setTargetSpeed()
 local brakeStartPosition = nil
 local brakeStartTime = 0
 
--- Arc-length accumulator (path distance, not straight-line chord): a policy that
--- yaws while braking shortens the chord below the true path length, which
--- inflates chord-based avg-G. Accumulated every physics tick while measuring;
--- reward code should use min(chord_g, arc_g) once wired to a reward that reads it.
-local brakeArcDist = 0
-local brakePrevPos = nil
-
 -- Last completed brake event
 local lastBrakeAvgGy = 0      -- m/s^2
 local lastBrakeAvgG = 0       -- in g's (using powertrain.currentGravity)
-local lastBrakeAvgGArc = 0    -- in g's, computed from path (arc) distance instead of chord
 local lastBrakeDist = 0       -- meters
-local lastBrakeDistArc = 0    -- meters, true path length between measure-start and stop
 local lastBrakeStartSpeed = 0 -- m/s (= targetSpeed, the measurement start)
 local lastBrakeDuration = 0   -- seconds
 
@@ -393,7 +373,7 @@ local function resetAccum()
   imuPitch = 0; imuRoll = 0  -- (PPO_V2) re-zero the gyro-integrated attitude per brake event
   brakeState = "idle"
   brakeStartPosition = nil; brakeStartTime = 0
-  lastBrakeAvgGy = 0; lastBrakeAvgG = 0; lastBrakeAvgGArc = 0; lastBrakeDist = 0; lastBrakeDistArc = 0; brakeArcDist = 0; brakePrevPos = nil
+  lastBrakeAvgGy = 0; lastBrakeAvgG = 0; lastBrakeDist = 0
   lastBrakeStartSpeed = 0; lastBrakeDuration = 0
   pollSpeedStart = -1; pollDtSum = 0; pollFrames = 0
   pollGyRollingBuf = {}; pollGyRollingIdx = 0
@@ -811,108 +791,8 @@ local function disarmBrakeSlam()
   electrics.values.tel_slam_fired = 0
 end
 
--- =====================================================
--- TIRE GRIP CONTROL
--- Changes the TIRE's friction, not the ground surface: the same mechanism
--- BeamNG's own tire-damage code uses (beamstate.lua:549-557) --
--- obj:setNodeFrictionSlidingCoefs on each wheel's treadNodes. Applied evenly
--- to every wheel (this is "different tires", not split-mu).
---
--- The multiplier is ALWAYS applied against v.data.nodes -- the untouched jbeam
--- values -- never against the current coefficients, so repeated calls cannot
--- compound and restoring is exactly applyGripMultiplier(1.0).
---
--- Timing: the change is armed and fires at brake onset, so the acceleration
--- and coast-down approach always happen at stock grip (a low-grip approach
--- would spin the wheels and never reach the target speed) and only the
--- braking phase sees the new value.
--- =====================================================
-local gripMultCurrent = 1.0
-local gripPendingMult = nil
-local gripLeadSeconds = 0
-local gripFired = false
-
-local function applyGripMultiplier(mult)
-  mult = mult or 1.0
-  local n = 0
-  if wheels and wheels.wheels and v and v.data and v.data.nodes then
-    for _, wheel in pairs(wheels.wheels) do
-      if wheel.treadNodes then
-        for _, nodecid in pairs(wheel.treadNodes) do
-          local nd = v.data.nodes[nodecid]
-          if nd and nd.frictionCoef then
-            obj:setNodeFrictionSlidingCoefs(
-              nodecid,
-              nd.frictionCoef * mult,
-              (nd.slidingFrictionCoef or nd.frictionCoef) * mult)
-            n = n + 1
-          end
-        end
-      end
-    end
-  end
-  gripMultCurrent = mult
-  electrics.values.tel_grip_mult = mult
-  electrics.values.tel_grip_nodes = n
-  return n
-end
-
--- Immediate change (used by the reference runner, which has no brake-onset
--- arming step of its own to hang this off).
-local function setGripMultiplier(mult)
-  gripPendingMult = nil
-  gripFired = false
-  electrics.values.tel_grip_armed = 0
-  return applyGripMultiplier(mult)
-end
-
--- Deferred change: fires at the brake onset (same physics tick the slam
--- latches), or leadSeconds earlier if asked. The lead is predicted from the
--- current deceleration, so it is approximate; leadSeconds = 0 is exact.
-local function armGripChange(mult, leadSeconds)
-  gripPendingMult = mult
-  gripLeadSeconds = leadSeconds or 0
-  gripFired = false
-  electrics.values.tel_grip_armed = 1
-  electrics.values.tel_grip_fired = 0
-end
-
-local function restoreGrip()
-  gripPendingMult = nil
-  gripFired = false
-  electrics.values.tel_grip_armed = 0
-  electrics.values.tel_grip_fired = 0
-  return applyGripMultiplier(1.0)
-end
-
-local function updateArmedGrip()
-  if gripPendingMult == nil or gripFired or slamArmTarget == nil then return end
-  local trigger
-  if gripLeadSeconds <= 0 then
-    trigger = instSpeed <= slamArmTarget          -- same tick as the slam
-  else
-    local decel = instGy                          -- current decel, m/s^2
-    if decel > 0.05 then
-      trigger = ((instSpeed - slamArmTarget) / decel) <= gripLeadSeconds
-    else
-      trigger = instSpeed <= slamArmTarget        -- coasting flat: no useful lead
-    end
-  end
-  if trigger then
-    local n = applyGripMultiplier(gripPendingMult)
-    gripFired = true
-    electrics.values.tel_grip_fired = 1
-    electrics.values.tel_grip_fire_speed = instSpeed
-    print(string.format(
-      "=== TELEMETRY: tire grip x%.3f applied on %d nodes at %.4f m/s ===",
-      gripPendingMult, n, instSpeed))
-  end
-end
-
-
 local function updateArmedSlam()
   if slamArmTarget == nil then return end
-  updateArmedGrip()
   if not slamFired and instSpeed <= slamArmTarget then
     slamFired = true
     electrics.values.tel_slam_fired = 1
@@ -1003,37 +883,22 @@ local function onPhysicsStep(dtPhys)
     if airspeed <= brakeTargetSpeed then
       brakeStartPosition = obj:getPosition()
       brakeStartTime = simTime
-      brakeArcDist = 0
-      brakePrevPos = brakeStartPosition
       brakeState = "measuring"
     end
   elseif brakeState == "measuring" then
-    local curPos = obj:getPosition()
-    if brakePrevPos then
-      brakeArcDist = brakeArcDist + (curPos - brakePrevPos):length()
-    end
-    brakePrevPos = curPos
     if airspeed <= 1 then
-      local endPosition = curPos
+      local endPosition = obj:getPosition()
       local distance = (brakeStartPosition - endPosition):length()
       local avgDeceleration = -(airspeed * airspeed - brakeTargetSpeed * brakeTargetSpeed) / (2 * distance)
       local gravity = powertrain.currentGravity
-      -- Arc distance is always >= chord; guard the same div-by-zero edge the
-      -- chord path already assumes can't happen (a real stop always has an
-      -- arc length >= its chord).
-      local arcDistSafe = math.max(brakeArcDist, distance)
-      local avgDecelerationArc = -(airspeed * airspeed - brakeTargetSpeed * brakeTargetSpeed) / (2 * arcDistSafe)
-      print(string.format("=== BRAKE EVENT DONE: dist=%.2fm avgDecel=%.2f gravity=%.4f avgG=%.4f arcDist=%.2fm avgGArc=%.4f ===",
-        distance, avgDeceleration, gravity, avgDeceleration / -gravity, arcDistSafe, avgDecelerationArc / -gravity))
+      print(string.format("=== BRAKE EVENT DONE: dist=%.2fm avgDecel=%.2f gravity=%.4f avgG=%.4f ===",
+        distance, avgDeceleration, gravity, avgDeceleration / -gravity))
       lastBrakeAvgGy = avgDeceleration
       lastBrakeAvgG = avgDeceleration / -gravity
-      lastBrakeAvgGArc = avgDecelerationArc / -gravity
       lastBrakeDist = distance
-      lastBrakeDistArc = arcDistSafe
       lastBrakeStartSpeed = brakeTargetSpeed
       lastBrakeDuration = simTime - brakeStartTime
       brakeStartPosition = nil
-      brakePrevPos = nil
       brakeState = "idle"
     end
   end
@@ -1130,9 +995,7 @@ local function onGraphicsStep(dtSim)
   electrics.values.tel_brake_active = (brakeState == "measuring") and 1 or 0
   electrics.values.tel_last_brake_avg_gy = lastBrakeAvgGy
   electrics.values.tel_last_brake_avg_g = lastBrakeAvgG
-  electrics.values.tel_last_brake_avg_g_arc = lastBrakeAvgGArc
   electrics.values.tel_last_brake_dist = lastBrakeDist
-  electrics.values.tel_last_brake_dist_arc = lastBrakeDistArc
   electrics.values.tel_last_brake_duration = lastBrakeDuration
 end
 
@@ -1168,9 +1031,7 @@ local function buildSensorData()
     poll_frames = pollFrames,
     last_brake_avg_gy = lastBrakeAvgGy,
     last_brake_avg_g = lastBrakeAvgG,
-    last_brake_avg_g_arc = lastBrakeAvgGArc,
     last_brake_dist = lastBrakeDist,
-    last_brake_dist_arc = lastBrakeDistArc,
     last_brake_start_speed = lastBrakeStartSpeed,
     last_brake_duration = lastBrakeDuration,
     brake_active = (brakeState == "measuring") and 1 or 0,
@@ -1292,7 +1153,7 @@ local function onReset()
 
   brakeState = "idle"
   brakeStartPosition = nil; brakeStartTime = 0
-  lastBrakeAvgGy = 0; lastBrakeAvgG = 0; lastBrakeAvgGArc = 0; lastBrakeDist = 0; lastBrakeDistArc = 0; brakeArcDist = 0; brakePrevPos = nil
+  lastBrakeAvgGy = 0; lastBrakeAvgG = 0; lastBrakeDist = 0
   lastBrakeStartSpeed = 0; lastBrakeDuration = 0
 
   -- Reset PD state but preserve enabled/config
@@ -1327,9 +1188,6 @@ M.onReset = onReset
 M.setBrakes = setBrakes
 M.releaseBrakes = releaseBrakes
 M.setTargetSpeed = setTargetSpeed
-M.setGripMultiplier = setGripMultiplier   -- tire grip: immediate
-M.armGripChange     = armGripChange       -- tire grip: at brake onset
-M.restoreGrip       = restoreGrip         -- tire grip: back to stock
 M.armBrakeSlam = armBrakeSlam       -- (PPO_V2) 2kHz-exact brake onset
 M.disarmBrakeSlam = disarmBrakeSlam
 M.resetAccum = resetAccum

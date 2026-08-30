@@ -76,16 +76,32 @@ def test_save_then_load_roundtrip(tmp_path):
     assert loaded.map == "italy"
 
 
-def test_load_missing_file_returns_defaults(tmp_path):
+def test_load_missing_file_returns_defaults(tmp_path, monkeypatch):
+    """game_folder is excepted: load() fills a blank one by looking for the
+    install, so this asserts the defaults with detection turned off."""
+    import sim_config as sc
+    monkeypatch.setattr(sc, "autodetect_game_folder", lambda g: None)
     loaded = load(str(tmp_path / "nope.json"))
     assert loaded == SimConfig()
 
 
-def test_load_corrupt_file_returns_defaults_not_crash(tmp_path):
+def test_load_corrupt_file_returns_defaults_not_crash(tmp_path, monkeypatch):
+    import sim_config as sc
+    monkeypatch.setattr(sc, "autodetect_game_folder", lambda g: None)
     p = tmp_path / "bad.json"
     p.write_text("{not json")
     loaded = load(str(p))
     assert loaded == SimConfig()
+
+
+def test_a_corrupt_file_still_gets_a_detected_game_folder(tmp_path, monkeypatch):
+    """Detection is not skipped on the error path -- a broken settings.json
+    should not also cost the user their install path."""
+    import sim_config as sc
+    monkeypatch.setattr(sc, "autodetect_game_folder", lambda g: r"C:\detected")
+    p = tmp_path / "bad.json"
+    p.write_text("{not json")
+    assert load(str(p)).game_folder == r"C:\detected"
 
 
 # --- env-seam pure helpers (abs_env_residual.py) ---
@@ -204,3 +220,37 @@ def test_detect_game_version_falls_back_to_folder_name_when_no_ini(tmp_path, mon
 def test_detect_game_version_none_when_neither_source_available(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     assert detect_game_version("drive", game_folder=r"D:\SteamLibrary\BeamNG.drive") is None
+
+
+# ----------------------------------------------------- game-folder autodetect
+def test_autodetect_only_fills_a_blank_game_folder(monkeypatch):
+    """An explicit setting is the user's, right or wrong, and is never
+    second-guessed -- otherwise pointing at a second install silently fails."""
+    import sim_config as sc
+    monkeypatch.setattr(sc, "autodetect_game_folder", lambda g: r"C:\detected")
+    kept = sc._with_detected_game_folder(sc.SimConfig(game_folder=r"C:\mine"))
+    assert kept.game_folder == r"C:\mine"
+    filled = sc._with_detected_game_folder(sc.SimConfig(game_folder=""))
+    assert filled.game_folder == r"C:\detected"
+
+
+def test_a_machine_with_no_install_stays_blank_rather_than_guessing(monkeypatch):
+    """None means 'ask the user', never an error and never a made-up path."""
+    import sim_config as sc
+    monkeypatch.setattr(sc, "autodetect_game_folder", lambda g: None)
+    cfg = sc._with_detected_game_folder(sc.SimConfig(game_folder=""))
+    assert cfg.game_folder == ""
+    assert any("not found" in p for p in sc.validate(cfg))
+
+
+def test_load_fills_the_game_folder_when_settings_json_is_missing(monkeypatch, tmp_path):
+    """The first-run case: no settings.json anywhere."""
+    import sim_config as sc
+    monkeypatch.setattr(sc, "autodetect_game_folder", lambda g: r"C:\detected")
+    cfg = sc.load(str(tmp_path / "nope.json"))
+    assert cfg.game_folder == r"C:\detected"
+
+
+def test_autodetect_returns_none_for_an_unknown_game():
+    import sim_config as sc
+    assert sc.autodetect_game_folder("playstation") is None

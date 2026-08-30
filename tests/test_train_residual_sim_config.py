@@ -16,7 +16,10 @@ def _ns(**over):
     return argparse.Namespace(**base)
 
 
-def test_defaults_when_nothing_passed_and_no_settings_file():
+def test_defaults_when_nothing_passed_and_no_settings_file(monkeypatch):
+    """game_folder excepted -- it is auto-detected when blank (sim_config)."""
+    import sim_config as sc
+    monkeypatch.setattr(sc, "autodetect_game_folder", lambda g: None)
     cfg = build_sim_config(_ns())
     assert cfg == SimConfig()
 

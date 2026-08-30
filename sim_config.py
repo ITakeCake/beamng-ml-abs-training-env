@@ -76,6 +76,75 @@ def find_exe(game_folder, game):
     return candidate if os.path.isfile(candidate) else None
 
 
+# Where BeamNG actually ends up, in the order worth trying. The Steam library
+# path is read from Steam's own registry key rather than assumed, because a
+# second library on another drive is the normal case, not the exception.
+def _steam_libraries():
+    libs = []
+    try:
+        import winreg
+        for root, key in ((winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam"),
+                          (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam")):
+            try:
+                with winreg.OpenKey(root, key) as k:
+                    for name in ("SteamPath", "InstallPath"):
+                        try:
+                            libs.append(winreg.QueryValueEx(k, name)[0])
+                        except OSError:
+                            pass
+            except OSError:
+                pass
+    except ImportError:
+        return libs
+    # libraryfolders.vdf lists every additional library Steam knows about.
+    extra = []
+    for base in list(libs):
+        vdf = os.path.join(base, "steamapps", "libraryfolders.vdf")
+        try:
+            with open(vdf, encoding="utf-8", errors="ignore") as fh:
+                extra += re.findall(r'"path"\s*"([^"]+)"', fh.read())
+        except OSError:
+            pass
+    return libs + [p.replace("\\\\", "\\") for p in extra]
+
+
+def autodetect_game_folder(game):
+    """Find this machine's BeamNG install without being told where it is.
+
+    A tool published for other people cannot ship one machine's path, and
+    requiring --game-folder on every command is the kind of friction that makes
+    a tool feel broken on first run. Returns None when nothing is found, which
+    callers must treat as "ask the user", never as an error."""
+    exe = EXE_NAME.get(game)
+    if not exe:
+        return None
+    roots = []
+    for lib in _steam_libraries():
+        roots.append(os.path.join(lib, "steamapps", "common", "BeamNG.drive"))
+    for env in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
+        base = os.environ.get(env)
+        if base:
+            roots.append(os.path.join(base, "BeamNG.drive"))
+            roots.append(os.path.join(base, "BeamNG.tech"))
+    # .tech is usually unpacked by hand, commonly beside the userpath or on the
+    # desktop, and its folder carries the version (BeamNG.tech.v0.37.6.0).
+    home = os.path.expanduser("~")
+    for parent in (os.path.join(home, "Desktop", "BeamNG.tech"),
+                   os.path.join(home, "Desktop"),
+                   os.path.join(home, "BeamNG.tech")):
+        roots.append(parent)
+        try:
+            for name in sorted(os.listdir(parent), reverse=True):
+                if name.lower().startswith("beamng."):
+                    roots.append(os.path.join(parent, name))
+        except OSError:
+            pass
+    for root in roots:
+        if find_exe(root, game):
+            return root
+    return None
+
+
 def guess_version_from_folder(game_folder):
     """Best-effort only: this install's folder happens to be named
     'BeamNG.tech.v0.37.6.0'. Steam installs (typical for .drive) usually
@@ -136,8 +205,22 @@ def load(path):
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
     except (OSError, json.JSONDecodeError):
-        return SimConfig()
+        return _with_detected_game_folder(SimConfig())
     known = {f.name for f in dataclasses.fields(SimConfig)}
     data = {k: (tuple(v) if isinstance(v, list) else v)
             for k, v in data.items() if k in known}
-    return SimConfig(**data)
+    return _with_detected_game_folder(SimConfig(**data))
+
+
+def _with_detected_game_folder(cfg):
+    """Fill in an empty game folder by looking for the install. Only ever fills
+    a BLANK value -- an explicit setting, right or wrong, is the user's and is
+    never second-guessed. Without this, every CLI entry point needs
+    --game-folder spelled out on every invocation on a machine that has no
+    settings.json yet, which is every machine on first run."""
+    if cfg.game_folder:
+        return cfg
+    found = autodetect_game_folder(cfg.game)
+    if found:
+        cfg.game_folder = found
+    return cfg
