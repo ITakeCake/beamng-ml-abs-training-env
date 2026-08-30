@@ -112,3 +112,52 @@ def unique_model_labels(models):
                 else m.display_name)
         labels[label] = m
     return labels
+
+
+# --- ML ABS part check -----------------------------------------------------
+# The in-car training loop needs the ML ABS controller present on the car: the
+# env spawns, slams the brakes, then waits for the controller to publish
+# mlabs_active. A .pc without that part never publishes anything, so the wait
+# times out with "active=None" -- an error that describes the symptom and not
+# the cause, two minutes after the game booted.
+ML_ABS_PART_PREFIX = "etk_DSE_ABS_MTB_ML"
+ABS_SLOT_HINT = "ABS"
+
+
+def pc_abs_part(pc_path):
+    """The ABS part named by a .pc file: a part name, "" for an explicitly
+    empty ABS slot, or None when the file names no ABS slot at all.
+
+    utf-8-sig because BeamNG writes these with a BOM often enough to matter."""
+    import json
+    with open(pc_path, encoding="utf-8-sig") as fh:
+        parts = json.load(fh).get("parts", {})
+    for slot, part in parts.items():
+        if ABS_SLOT_HINT in slot:
+            return part
+    return None
+
+
+def check_ml_abs_car(pc_path):
+    """None if this .pc can run in-car training, else a problem string saying
+    what is wrong and what to pick instead. Checked BEFORE launching the game."""
+    try:
+        part = pc_abs_part(pc_path)
+    except (OSError, ValueError) as e:
+        return f"could not read {os.path.basename(pc_path)}: {e}"
+
+    name = os.path.basename(pc_path)
+    if part is None:
+        return (f"{name} has no ABS slot at all, so the ML ABS controller can "
+                f"never load. Training would spawn the car, slam the brakes and "
+                f"time out waiting for a controller that is not there. Pick a "
+                f"configuration whose ABS is set to ML ABS.")
+    if part == "":
+        return (f"{name} has its ABS slot empty (this is the no-ABS lockup "
+                f"reference car). Training needs the ML ABS part fitted. Pick a "
+                f"configuration whose ABS is set to ML ABS.")
+    if not part.startswith(ML_ABS_PART_PREFIX):
+        return (f"{name} has ABS part {part!r}, not the ML ABS controller. "
+                f"Training drives the car through that controller, so it has to "
+                f"be fitted. Pick a configuration whose ABS is set to ML ABS.")
+    return None

@@ -21,7 +21,7 @@ from sim_config import (
 )
 from vehicle_scanner import (
     scan_models, scan_trims, scan_custom_configs, resolve_part_config,
-    unique_model_labels, SUPPORTED_ML_ABS_MODELS,
+    unique_model_labels, check_ml_abs_car, SUPPORTED_ML_ABS_MODELS,
 )
 from compat import check_compat
 import asset_installer
@@ -481,6 +481,8 @@ class ResidualTrainerGUI:
         else:
             self._resolved_vehicle_pc = resolve_part_config(model.name, trim.pc_name)
             self.car_resolved_var.set(self._resolved_vehicle_pc)
+            self._car_abs_problem = self._check_car_has_ml_abs(
+                model.name, trim.pc_name)
         if model.name not in SUPPORTED_ML_ABS_MODELS:
             self.car_warning_var.set(
                 f"No ML-ABS part ships for {model.name} yet -- only "
@@ -653,6 +655,13 @@ class ResidualTrainerGUI:
             messagebox.showerror("Invalid settings", "\n".join(problems))
             return
 
+        abs_problem = getattr(self, "_car_abs_problem", None)
+        if abs_problem:
+            log.warning("START refused: selected car cannot run in-car training: %s",
+                        abs_problem)
+            messagebox.showerror("Car has no ML ABS part", abs_problem)
+            return
+
         sim_cfg = self._collect_sim_config()
         sim_problems = validate_sim_config(sim_cfg)
         if sim_problems:
@@ -705,6 +714,24 @@ class ResidualTrainerGUI:
         self._last_parse_err = None
         log.info("launched trainer pid=%d run=%s cmd=%s", self.proc.pid, self._active_run, cmd)
         self.status_var.set(f"running (pid {self.proc.pid})")
+
+    def _check_car_has_ml_abs(self, model_name, pc_name):
+        """Problem string if the selected configuration cannot run in-car
+        training, else None.
+
+        Training spawns the car, slams the brakes, and waits for the ML ABS
+        controller to report in. A .pc without that part never reports, so the
+        wait times out with "active=None" -- an error naming the symptom, two
+        minutes after the game booted. Reading the .pc costs nothing and says
+        what is actually wrong."""
+        for root in (os.path.join(ASSETS_DIR, "cars", model_name),
+                     os.path.join(content_userpath(self._collect_sim_config()),
+                                  "vehicles", model_name)):
+            path = os.path.join(root, pc_name if pc_name.endswith(".pc")
+                                else pc_name + ".pc")
+            if os.path.isfile(path):
+                return check_ml_abs_car(path)
+        return None      # not found locally -- let the trainer be the judge
 
     def calibrate(self):
         """Measure the slam/stock references for the configuration currently set
