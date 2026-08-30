@@ -38,16 +38,16 @@ RUN_HELP = {
     "pedal_spec": (
         "Which pedal positions to draw from. One is picked per attempt and\n"
         "held for the whole stop.\n\n"
-        "0.5,0.75,1.0  a LIST -- only these. Use this one.\n"
-        "0.6           one fixed level\n"
-        "0.5-1.0       a range -- anything between, in 0.01 steps\n\n"
-        "Values snap to 2 decimals, because each distinct pedal level needs\n"
-        "its own measured baseline (about 7 minutes) before the normalized\n"
-        "reward can score it. Six listed levels is ~40 minutes; the range\n"
-        "0.5-1.0 is 51 levels and about 5 hours, so it is refused with the\n"
-        "normalized reward.\n\n"
+        "0.5-1.0       a range -- every 0.01 step between them (51 levels)\n"
+        "0.5,0.75,1.0  a list -- only these\n"
+        "0.6           one fixed level\n\n"
+        "Values snap to 2 decimals, because each distinct level needs its own\n"
+        "measured baseline before the normalized reward can score it.\n\n"
+        "With 'Fast calibration' on, the whole 0.5-1.0 range is about 20\n"
+        "minutes; stepped it is nearer three hours. A list is still cheaper\n"
+        "when you do not need the resolution.\n\n"
         "Press 'Calibrate baselines' after setting this -- it measures exactly\n"
-        "the levels listed here."
+        "the levels this implies."
     ),
     "grip": (
         "How slippery the road is, by scaling tyre grip.\n\n"
@@ -110,6 +110,29 @@ RUN_HELP = {
         "      needs a real ~70-second stop in the game. Start with this.\n\n"
         "PPO = learns only from recent attempts. Steadier, but needs many more\n"
         "      of them, so it is slower in wall-clock time for this project."
+    ),
+    "fast_calibration": (
+        "Measure calibration stops free-running under a physics speed factor,\n"
+        "instead of stepping the simulation one tick at a time.\n\n"
+        "About 11x faster per stop (~4s instead of ~35s). Measured head to\n"
+        "head on 2026-08-30, interleaved, 5 reps per regime, 60 mph, full\n"
+        "pedal:\n"
+        "   deterministic 1.0135      live 4x  1.0214\n"
+        "   live 10x      1.0091      live 25x 1.0066\n\n"
+        "All within 0.8%, which is smaller than any single regime's own\n"
+        "run-to-run spread (~0.02) -- so they are indistinguishable there.\n\n"
+        "That was ONE configuration though, not a proof for all of them, so\n"
+        "every row records how it was measured and you are warned before\n"
+        "mixing regimes in one table.\n\n"
+        "Affects calibration only. Training is untouched."
+    ),
+    "speed_factor": (
+        "How much faster than real time to run physics during calibration.\n\n"
+        "10 is the default. Higher numbers are accepted but buy nothing: the\n"
+        "engine caps out near 5x real time on this machine (measured), and\n"
+        "what remains is the acceleration run-up, not the stop. 4x, 10x and\n"
+        "25x all measured about 4s per stop.\n\n"
+        "Only used when 'Fast calibration' is ticked."
     ),
     "net_arch": (
         "The size of the controller's 'brain' -- how many layers of how many\n"

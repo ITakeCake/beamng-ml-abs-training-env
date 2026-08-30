@@ -115,10 +115,73 @@ def test_no_pedal_flag_when_randomization_is_off():
     assert "--pedals" not in build_calibration_cmd(_settings(), car="etk800")
 
 
-def test_a_continuous_range_is_refused_with_the_cost_spelled_out():
+def test_a_range_is_judged_by_time_not_by_level_count():
+    """Fast mode measures a stop in ~4s instead of ~35s, which turns the full
+    0.5-1.0 range (51 levels, 306 stops) from about three hours into about
+    twenty minutes. A blanket refusal on level count would now be wrong."""
+    slow = validate_calibration_settings(
+        _settings(pedal_random=True, pedal_spec="0.5-1.0", fast_calibration=False))
+    fast = validate_calibration_settings(
+        _settings(pedal_random=True, pedal_spec="0.5-1.0", fast_calibration=True))
+    assert fast == []                      # ~20 min: fine
+    assert slow == []                      # ~3 h: under the 4 h ceiling
+
+
+def test_a_genuinely_impractical_matrix_is_still_refused():
+    """Several speeds and grips multiply on top of the pedal levels; the guard
+    is on total time, so it fires when the run stops being something a person
+    starts and waits for."""
     problems = validate_calibration_settings(
-        _settings(pedal_random=True, pedal_spec="0.5-1.0"))
-    assert any("51 levels" in p and "hours" in p for p in problems)
+        _settings(pedal_random=True, pedal_spec="0.4-1.0", speeds="60,90,120",
+                  grip="0.5,0.75,1.0", fast_calibration=False))
+    assert any("stops" in p and ("h " in p or "hour" in p) for p in problems)
+
+
+def test_the_refusal_names_fast_mode_as_the_way_out():
+    problems = validate_calibration_settings(
+        _settings(pedal_random=True, pedal_spec="0.4-1.0", speeds="60,90,120",
+                  grip="0.5,0.75,1.0", fast_calibration=False))
+    assert any("Fast calibration" in p for p in problems)
+
+
+def test_fast_mode_reaches_the_runner_with_its_speed_factor():
+    cmd = build_calibration_cmd(
+        _settings(fast_calibration=True, speed_factor="10"), car="etk800")
+    assert "--live" in cmd
+    assert cmd[cmd.index("--speed-factor") + 1] == "10"
+
+
+def test_stepped_mode_passes_no_speed_flags():
+    cmd = build_calibration_cmd(_settings(fast_calibration=False), car="etk800")
+    assert "--live" not in cmd and "--speed-factor" not in cmd
+
+
+# ------------------------------------------------------------- regime record
+def test_a_row_records_how_it_was_measured():
+    """Two regimes in one table are not strictly comparable, and the table IS
+    the ruler -- a silently mixed one would move the zero point for some
+    configurations and not others."""
+    from calibration import summarize, regime_name, DETERMINISTIC
+    assert summarize([1.0, 1.1])["regime"] == DETERMINISTIC
+    assert summarize([1.0], regime_name(10, True))["regime"] == "live_x10"
+    assert regime_name(4, True) == "live_x4"
+    assert regime_name(10, False) == DETERMINISTIC     # factor is moot when stepped
+
+
+def test_table_regimes_reports_a_mix():
+    from calibration import CalibrationTable, summarize, regime_name, table_regimes
+    t = CalibrationTable(car="etk800")
+    t.put("a", "slam", summarize([1.0]))
+    t.put("b", "slam", summarize([1.0], regime_name(10, True)))
+    assert table_regimes(t) == ["deterministic", "live_x10"]
+
+
+def test_rows_written_before_regimes_existed_read_as_deterministic():
+    """The three real rows already in etk800.json predate this field; they were
+    measured stepped, so that is what absence must mean."""
+    from calibration import CalibrationTable, table_regimes
+    t = CalibrationTable(car="x", rows={"k": {"slam": {"median": 1.0}}})
+    assert table_regimes(t) == ["deterministic"]
 
 
 def test_a_list_is_accepted():

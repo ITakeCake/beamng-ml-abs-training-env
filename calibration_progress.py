@@ -138,3 +138,17 @@ def describe(progress):
         return (f"stop {done} of {total}{where} -- "
                 f"{format_eta(progress['eta_seconds'])} left")
     return f"{done} stops measured{where}"
+
+
+# Observed medians, 2026-08-30 A/B (60 mph, etk800). Stepping is dominated by
+# the per-step round trip; fast mode is dominated by the acceleration run-up,
+# which is why raising the speed factor past ~4 buys nothing.
+SECONDS_PER_STOP = {"deterministic": 35.0, "fast": 4.0}
+
+
+def estimate_seconds(stops, fast=False):
+    return stops * SECONDS_PER_STOP["fast" if fast else "deterministic"]
+
+
+def estimate_text(stops, fast=False):
+    return format_eta(estimate_seconds(stops, fast))

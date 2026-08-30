@@ -54,7 +54,23 @@ def config_key(grip, speed_mph, radius_m, pedal=FULL_PEDAL):
     return f"{base}|pedal={float(pedal):.2f}"
 
 
-def summarize(values):
+DETERMINISTIC = "deterministic"
+
+
+def regime_name(speed_factor=1.0, live=False):
+    """How a row was measured. Recorded because two regimes in one table are
+    not comparable to each other, and a table IS the ruler -- a silently mixed
+    one would shift the zero point for some configurations and not others.
+
+    Measured 2026-08-30, interleaved A/B at 60 mph full pedal: deterministic
+    1.0135, live x4 1.0214, x10 1.0091, x25 1.0066 -- all within 0.8%, which is
+    smaller than any single arm's own run-to-run spread (~0.02). So the regimes
+    are equivalent at that configuration; the label exists because that was
+    established for ONE configuration, not proven universally."""
+    return DETERMINISTIC if not live else f"live_x{float(speed_factor):g}"
+
+
+def summarize(values, regime=DETERMINISTIC):
     """Median (robust to the one bad episode a live run always produces) plus
     the raw values and spread, so a noisy config is visible rather than hidden
     behind a single number."""
@@ -67,6 +83,7 @@ def summarize(values):
         "max": max(vals),
         "n": len(vals),
         "values": vals,
+        "regime": regime,
     }
 
 
@@ -154,6 +171,16 @@ class CalibrationTable:
             data = json.load(fh)
         return cls(car=data.get("car", ""), rows=data.get("rows", {}),
                    steering=data.get("steering", {}))
+
+
+def table_regimes(table):
+    """Every distinct regime present. More than one means the table mixes
+    measurement methods and its rows are not strictly comparable."""
+    found = set()
+    for row in table.rows.values():
+        for entry in row.values():
+            found.add(entry.get("regime", DETERMINISTIC))
+    return sorted(found)
 
 
 def table_hash(table):

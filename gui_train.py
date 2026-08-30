@@ -173,6 +173,22 @@ class ResidualTrainerGUI:
                   "needs a calibrated steering angle)").pack(side="left")
 
         # Row 4c: reward preset
+        row_fast = ttk.Frame(self.training_tab)
+        row_fast.pack(fill="x", **pad)
+        self.fast_cal_var = tk.BooleanVar(
+            value=bool(gui_state.run_value(self.state, "fast_calibration", True)))
+        cbf = ttk.Checkbutton(row_fast, text="Fast calibration",
+                              variable=self.fast_cal_var)
+        cbf.pack(side="left")
+        gui_help.attach(cbf, None, "fast_calibration")
+        self.speed_factor_var = tk.StringVar(
+            value=str(gui_state.run_value(self.state, "speed_factor", "10")))
+        e = ttk.Entry(row_fast, textvariable=self.speed_factor_var, width=6)
+        e.pack(side="left", padx=6)
+        gui_help.attach(e, None, "speed_factor")
+        ttk.Label(row_fast, text="x speed  (~11x faster per stop; affects "
+                  "calibration only, not training)").pack(side="left")
+
         row4c = ttk.Frame(self.training_tab)
         row4c.pack(fill="x", **pad)
         ttk.Label(row4c, text="Reward:").pack(side="left")
@@ -632,6 +648,8 @@ class ResidualTrainerGUI:
             "car_model": self.car_model_var.get(),
             "car_trim": self.car_trim_var.get(),
             "car_custom": self.car_custom_var.get(),
+            "fast_calibration": self.fast_cal_var.get(),
+            "speed_factor": self.speed_factor_var.get(),
         }
         gui_state.remember_run(self.state, values)
         if self.field_vars:
@@ -700,6 +718,8 @@ class ResidualTrainerGUI:
             resume=self.resume_var.get(),
             vehicle_pc=getattr(self, "_resolved_vehicle_pc", None),
             net_arch=self.net_arch_var.get(),
+            fast_calibration=self.fast_cal_var.get(),
+            speed_factor=self.speed_factor_var.get(),
             grip=self.grip_var.get(),
             corner=self.corner_var.get(),
             reward=self.reward_var.get(),
@@ -837,13 +857,16 @@ class ResidualTrainerGUI:
         cmd = build_calibration_cmd(settings, car=model)
         corner = settings.get("corner") or "straight"
         planned = self._planned_stops(settings)
+        regime = self._regime_label(settings)
+        mixed = self._mixed_regime_warning(model, regime)
         if not messagebox.askokcancel(
                 "Calibrate baselines",
                 f"Measure slam and stock ABS references for {model}.\n\n"
                 f"speeds: {settings['speeds']}\n"
                 f"grip: {settings.get('grip') or 'stock'}\n"
                 f"corner: {corner}\n\n"
-                f"{planned} stops in total. This drives the car repeatedly (a "
+                f"{planned} stops in total, measured {regime}.{mixed}\n\n"
+                f"This drives the car repeatedly (a "
                 f"corner also seeks its steering angle first). Results are cached "
                 f"in calibration/{model}.json -- it only needs running once per "
                 f"configuration.\n\nStart?"):
@@ -866,6 +889,39 @@ class ResidualTrainerGUI:
                  proc.pid, model, planned, cmd)
         self.status_var.set(f"calibrating {model} (pid {proc.pid})")
         self._open_calibration_window(proc, model, planned, log_path, mark)
+
+    def _regime_label(self, settings):
+        from calibration import regime_name
+        if not settings.get("fast_calibration"):
+            return "deterministic (stepped)"
+        try:
+            factor = float(settings.get("speed_factor") or 10)
+        except ValueError:
+            factor = 10.0
+        return f"live at {factor:g}x speed"
+
+    def _mixed_regime_warning(self, car, regime_desc):
+        """A calibration table is the ruler the reward divides by, so rows
+        measured different ways are not strictly comparable. Say so before the
+        run rather than leaving it to be discovered in the JSON."""
+        from calibration import CalibrationTable, table_regimes, regime_name
+        path = os.path.join(HERE, "calibration", f"{car}.json")
+        if not os.path.exists(path):
+            return ""
+        try:
+            existing = table_regimes(CalibrationTable.load(path))
+        except (OSError, ValueError):
+            return ""
+        if not existing:
+            return ""
+        s = self._collect_settings()
+        new = regime_name(float(s.get("speed_factor") or 10),
+                          bool(s.get("fast_calibration")))
+        if new in existing and len(existing) == 1:
+            return ""
+        return (f"\n\nNOTE: {car}.json already holds rows measured "
+                f"{', '.join(existing)}. Mixing regimes in one table means its "
+                f"rows are not strictly comparable to each other.")
 
     def _planned_stops(self, settings):
         """How many stops the chosen configuration implies."""

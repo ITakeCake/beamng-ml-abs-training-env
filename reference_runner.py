@@ -31,7 +31,8 @@ from beamngpy.sensors import Electrics
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from calibration import CalibrationTable, config_key, summarize, STRAIGHT
+from calibration import (CalibrationTable, config_key, regime_name,
+                         summarize, STRAIGHT)
 from corner import (LEFT, STEERING_SEEK_MAX_ITERS, initial_steering_guess,
                     lateral_g_for_radius, parse_corner_spec, radius_for_lateral_g,
                     radius_from_yaw, seek_is_saturated, steering_seek_converged,
@@ -627,7 +628,9 @@ def run_calibration(sim_cfg, car, speeds, reps, grips=(1.0,), radius_m=STRAIGHT,
                                                     steering=steering, pedal=pedal)
                             values.append(r["avg_g_arc"])
                             time.sleep(0.5)
-                        table.put(key, reference, summarize(values))
+                        table.put(key, reference,
+                                  summarize(values, regime_name(
+                                      speed_factor, live)))
                         log.info("calibrated %s %s: %s", reference, key,
                                  summarize(values))
         finally:

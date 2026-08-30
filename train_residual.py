@@ -274,7 +274,10 @@ def make_venv(args):
     # failing. So a normalized run needs a row per pedal level it can draw.
     pedal_spec = parse_pedal_spec(args.pedal)
     if spec.normalize and pedal_spec is not None:
-        if pedal_spec.needs_continuous_calibration:
+        # A continuous range is no longer refused outright: fast calibration
+        # measures all 51 levels of 0.5-1.0 in about twenty minutes, so the
+        # question is simply whether the rows exist, which is checked below.
+        if pedal_spec.needs_continuous_calibration and not table:
             raise SystemExit(
                 f"--pedal {args.pedal!r} draws continuously, which is "
                 f"{len(pedal_spec.levels())} distinct levels at 2 decimals -- each "
