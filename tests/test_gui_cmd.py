@@ -82,3 +82,47 @@ def test_a_straight_corner_and_stock_grip_are_valid_and_passed_through():
     assert validate_settings(s) == []
     cmd = build_cmd(s)
     assert cmd[cmd.index("--corner") + 1] == "straight"
+
+
+# ----------------------------------------------- calibration command
+from gui_cmd import build_calibration_cmd, validate_calibration_settings
+
+
+def test_calibration_uses_the_same_configuration_the_training_tab_is_set_to():
+    """A ruler measured on a different configuration than it scores is worse
+    than no ruler -- so the fields are shared, not asked for twice."""
+    s = _base()
+    s.update(speeds="60,90", grip="0.5,1.0", corner="150L")
+    cmd = build_calibration_cmd(s, car="etk800")
+    assert cmd[1] == "reference_runner.py"
+    assert cmd[cmd.index("--car") + 1] == "etk800"
+    assert cmd[cmd.index("--speeds") + 1] == "60,90"
+    assert cmd[cmd.index("--grips") + 1] == "0.5,1.0"
+    assert cmd[cmd.index("--corner") + 1] == "150L"
+
+
+def test_stock_grip_and_straight_add_no_flags():
+    s = _base()
+    s.update(grip="off", corner="straight")
+    cmd = build_calibration_cmd(s, car="etk800")
+    assert "--grips" not in cmd
+    assert cmd[cmd.index("--corner") + 1] == "straight"
+
+
+def test_a_continuous_grip_range_has_no_levels_to_calibrate():
+    s = _base()
+    s["grip"] = "0.4-1.0"
+    cmd = build_calibration_cmd(s, car="etk800")
+    assert "--grips" not in cmd
+    assert any("continuously" in p for p in validate_calibration_settings(s))
+
+
+def test_a_fixed_grip_is_a_single_calibratable_level():
+    s = _base()
+    s["grip"] = "0.6"
+    assert build_calibration_cmd(s, car="etk800")[-1] == "0.6"
+    assert validate_calibration_settings(s) == []
+
+
+def test_reps_are_passed_through():
+    assert build_calibration_cmd(_base(), car="etk800", reps=5)[-1] == "5"

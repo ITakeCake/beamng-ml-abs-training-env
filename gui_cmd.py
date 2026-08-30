@@ -43,6 +43,47 @@ def build_cmd(settings):
     return cmd
 
 
+def build_calibration_cmd(settings, car, reps=3):
+    """Argv for reference_runner.py over the SAME configuration the Training tab
+    is set to. Calibration is only a ruler if it was measured on the exact
+    configuration it will score, so speeds/grip/corner come from the training
+    settings rather than being asked for twice -- a second set of fields is a
+    second chance to measure the wrong thing.
+
+    Grip levels: only the enumerable ones. A continuous range draws values
+    nothing can be calibrated at, which the trainer already refuses to pair
+    with a normalized reward."""
+    cmd = [PYTHON, "reference_runner.py",
+           "--car", str(car),
+           "--speeds", str(settings["speeds"]),
+           "--reps", str(reps)]
+    grip = settings.get("grip")
+    if grip:
+        spec = parse_grip_spec(grip)
+        levels = spec.levels() if spec else None
+        if levels:
+            cmd += ["--grips", ",".join(str(g) for g in levels)]
+    if settings.get("corner"):
+        cmd += ["--corner", str(settings["corner"])]
+    return cmd
+
+
+def validate_calibration_settings(settings):
+    """Problems that would make a calibration run measure the wrong thing."""
+    problems = validate_settings(settings)
+    grip = settings.get("grip")
+    if grip:
+        try:
+            spec = parse_grip_spec(grip)
+        except ValueError:
+            return problems          # already reported by validate_settings
+        if spec and spec.needs_continuous_calibration:
+            problems.append(
+                f"grip {grip!r} draws continuously, so there is no finite set of "
+                f"levels to calibrate. Use a list (e.g. \"0.5,0.75,1.0\") instead.")
+    return problems
+
+
 def validate_settings(settings):
     problems = []
     try:

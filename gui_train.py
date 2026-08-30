@@ -10,7 +10,8 @@ from tkinter import filedialog, messagebox, ttk
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from gui_cmd import build_cmd, validate_settings
+from gui_cmd import (build_cmd, build_calibration_cmd, validate_settings,
+                     validate_calibration_settings)
 from residual_log import setup_logging, tail_lines
 from sim_config import (
     SimConfig, load as load_sim_config, save as save_sim_config,
@@ -168,6 +169,8 @@ class ResidualTrainerGUI:
         row6.pack(fill="x", **pad)
         ttk.Button(row6, text="START", command=self.start).pack(side="left")
         ttk.Button(row6, text="GRACEFUL STOP", command=self.stop).pack(side="left", padx=6)
+        ttk.Button(row6, text="Calibrate baselines",
+                   command=self.calibrate).pack(side="left", padx=(18, 0))
         self.status_var = tk.StringVar(value="idle")
         ttk.Label(row6, textvariable=self.status_var).pack(side="left", padx=12)
 
@@ -668,6 +671,65 @@ class ResidualTrainerGUI:
         self._last_parse_err = None
         log.info("launched trainer pid=%d run=%s cmd=%s", self.proc.pid, self._active_run, cmd)
         self.status_var.set(f"running (pid {self.proc.pid})")
+
+    def calibrate(self):
+        """Measure the slam/stock references for the configuration currently set
+        on this tab, so the normalized reward has anchors for it.
+
+        Deliberately reuses the Training tab's own speeds/grip/corner rather than
+        offering its own: a reference measured on a different configuration than
+        it scores is worse than a missing one, because training consumes it
+        without complaint. Same simulator validation and launch path as START."""
+        settings = self._collect_settings()
+        problems = validate_calibration_settings(settings)
+        if problems:
+            log.warning("CALIBRATE refused: %s", problems)
+            messagebox.showerror("Invalid settings", "\n".join(problems))
+            return
+
+        model = self._car_model_by_display.get(self.car_model_var.get())
+        if not model:
+            log.warning("CALIBRATE refused: no car model selected")
+            messagebox.showerror(
+                "No car selected",
+                "Pick a car model first -- calibration is measured per car and "
+                "written to calibration/<model>.json.")
+            return
+
+        sim_cfg = self._collect_sim_config()
+        sim_problems = validate_sim_config(sim_cfg)
+        if sim_problems:
+            log.warning("CALIBRATE refused: invalid simulator settings: %s", sim_problems)
+            messagebox.showerror("Invalid simulator settings (Simulator tab)",
+                                 "\n".join(sim_problems))
+            self.notebook.select(self.sim_tab)
+            return
+        save_sim_config(sim_cfg, SETTINGS_PATH)   # reference_runner.py reads this
+
+        cmd = build_calibration_cmd(settings, car=model)
+        corner = settings.get("corner") or "straight"
+        if not messagebox.askokcancel(
+                "Calibrate baselines",
+                f"Measure slam and stock ABS references for {model}.\n\n"
+                f"speeds: {settings['speeds']}\n"
+                f"grip: {settings.get('grip') or 'stock'}\n"
+                f"corner: {corner}\n\n"
+                f"This drives the car repeatedly and takes a while (a corner also "
+                f"seeks its steering angle first). Results are cached in "
+                f"calibration/{model}.json -- it only needs running once per "
+                f"configuration.\n\nStart?"):
+            log.info("calibration cancelled by user")
+            return
+
+        creationflags = subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0
+        try:
+            proc = subprocess.Popen(cmd, cwd=HERE, creationflags=creationflags)
+        except OSError as e:
+            log.error("calibration launch FAILED: %s: %s  cmd=%s", type(e).__name__, e, cmd)
+            messagebox.showerror("Launch failed", f"{e}\n\nSee logs\\gui.log")
+            return
+        log.info("launched calibration pid=%d car=%s cmd=%s", proc.pid, model, cmd)
+        self.status_var.set(f"calibrating {model} (pid {proc.pid})")
 
     def stop(self):
         stop_path = os.path.join(HERE, "STOP_TRAINING.txt")
