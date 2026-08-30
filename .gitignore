@@ -11,3 +11,6 @@ STOP_TRAINING.txt
 
 # calibration is machine/install-specific measurement output
 # (committed deliberately for the reference car -- see calibration/etk800.json)
+
+# GUI field memory -- machine-local, like settings.json
+gui_state.json

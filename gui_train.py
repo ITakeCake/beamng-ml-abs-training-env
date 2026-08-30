@@ -11,6 +11,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import gui_help
+import gui_state
 from gui_cmd import (build_cmd, build_calibration_cmd, validate_settings,
                      validate_calibration_settings)
 from residual_log import setup_logging, tail_lines
@@ -31,6 +32,10 @@ from model_registry import list_finished_runs
 CUSTOM_TRIM_LABEL = "Custom..."
 
 SETTINGS_PATH = os.path.join(HERE, "settings.json")
+# Separate from settings.json, which holds the simulator config and is read
+# by train_residual.py at launch -- the GUI's own field memory has no
+# business in a file another process parses.
+GUI_STATE_PATH = os.path.join(HERE, "gui_state.json")
 ASSETS_DIR = os.path.join(HERE, "assets")
 RUNS_DIR = os.path.join(HERE, "runs")
 
@@ -72,6 +77,10 @@ class ResidualTrainerGUI:
         # never sees them -- so route them into gui.log explicitly.
         root.report_callback_exception = self._tk_exception
 
+        self.state = gui_state.load(GUI_STATE_PATH)
+        log.info("gui state: %d run fields, algos=%s",
+                 len(self.state.get("run", {})), sorted(self.state.get("algo", {})))
+
         pad = dict(padx=6, pady=4)
 
         self.notebook = ttk.Notebook(root)
@@ -90,7 +99,7 @@ class ResidualTrainerGUI:
         row1 = ttk.Frame(self.training_tab)
         row1.pack(fill="x", **pad)
         ttk.Label(row1, text="Algorithm:").pack(side="left")
-        self.algo_var = tk.StringVar(value="sac")
+        self.algo_var = tk.StringVar(value=gui_state.run_value(self.state, "algo", "sac"))
         algo_box = ttk.Combobox(row1, textvariable=self.algo_var, values=["sac", "ppo"],
                                 state="readonly", width=8)
         algo_box.pack(side="left", padx=6)
@@ -98,7 +107,8 @@ class ResidualTrainerGUI:
         gui_help.attach(algo_box, None, "algo")
 
         ttk.Label(row1, text="Network:").pack(side="left", padx=(18, 0))
-        self.net_arch_var = tk.StringVar(value="3x256")
+        self.net_arch_var = tk.StringVar(
+            value=gui_state.run_value(self.state, "net_arch", "3x256"))
         e = ttk.Entry(row1, textvariable=self.net_arch_var, width=16)
         e.pack(side="left", padx=6)
         gui_help.attach(e, None, "net_arch")
@@ -112,7 +122,8 @@ class ResidualTrainerGUI:
         row2 = ttk.Frame(self.training_tab)
         row2.pack(fill="x", **pad)
         ttk.Label(row2, text="Speeds (mph, comma-separated):").pack(side="left")
-        self.speeds_var = tk.StringVar(value="60")
+        self.speeds_var = tk.StringVar(
+            value=gui_state.run_value(self.state, "speeds", "60"))
         e = ttk.Entry(row2, textvariable=self.speeds_var, width=20)
         e.pack(side="left", padx=6)
         gui_help.attach(e, None, "speeds")
@@ -123,12 +134,14 @@ class ResidualTrainerGUI:
         # Row 3: pedal randomization
         row3 = ttk.Frame(self.training_tab)
         row3.pack(fill="x", **pad)
-        self.pedal_random_var = tk.BooleanVar(value=False)
+        self.pedal_random_var = tk.BooleanVar(
+            value=bool(gui_state.run_value(self.state, "pedal_random", False)))
         cb = ttk.Checkbutton(row3, text="Randomize pedal", variable=self.pedal_random_var,
                              command=self._toggle_pedal_entry)
         cb.pack(side="left")
         gui_help.attach(cb, None, "pedal_random")
-        self.pedal_spec_var = tk.StringVar(value="0.4-1.0")
+        self.pedal_spec_var = tk.StringVar(
+            value=gui_state.run_value(self.state, "pedal_spec", "0.4-1.0"))
         self.pedal_entry = ttk.Entry(row3, textvariable=self.pedal_spec_var, width=12,
                                      state="disabled")
         self.pedal_entry.pack(side="left", padx=6)
@@ -139,7 +152,8 @@ class ResidualTrainerGUI:
         row4 = ttk.Frame(self.training_tab)
         row4.pack(fill="x", **pad)
         ttk.Label(row4, text="Tire grip:").pack(side="left")
-        self.grip_var = tk.StringVar(value="off")
+        self.grip_var = tk.StringVar(
+            value=gui_state.run_value(self.state, "grip", "off"))
         e = ttk.Entry(row4, textvariable=self.grip_var, width=14)
         e.pack(side="left", padx=6)
         gui_help.attach(e, None, "grip")
@@ -149,7 +163,8 @@ class ResidualTrainerGUI:
         row4b = ttk.Frame(self.training_tab)
         row4b.pack(fill="x", **pad)
         ttk.Label(row4b, text="Corner radius:").pack(side="left")
-        self.corner_var = tk.StringVar(value="straight")
+        self.corner_var = tk.StringVar(
+            value=gui_state.run_value(self.state, "corner", "straight"))
         e = ttk.Entry(row4b, textvariable=self.corner_var, width=14)
         e.pack(side="left", padx=6)
         gui_help.attach(e, None, "corner")
@@ -160,7 +175,8 @@ class ResidualTrainerGUI:
         row4c = ttk.Frame(self.training_tab)
         row4c.pack(fill="x", **pad)
         ttk.Label(row4c, text="Reward:").pack(side="left")
-        self.reward_var = tk.StringVar(value="v5.0")
+        self.reward_var = tk.StringVar(
+            value=gui_state.run_value(self.state, "reward", "v5.0"))
         cbo = ttk.Combobox(row4c, textvariable=self.reward_var, width=14, state="readonly",
                            values=["v5.0", "normalized"])
         cbo.pack(side="left", padx=6)
@@ -174,12 +190,14 @@ class ResidualTrainerGUI:
         row5 = ttk.Frame(self.training_tab)
         row5.pack(fill="x", **pad)
         ttk.Label(row5, text="Run name:").pack(side="left")
-        self.run_name_var = tk.StringVar(value="residual_run1")
+        self.run_name_var = tk.StringVar(
+            value=gui_state.run_value(self.state, "run_name", "residual_run1"))
         e = ttk.Entry(row5, textvariable=self.run_name_var, width=20)
         e.pack(side="left", padx=6)
         gui_help.attach(e, None, "run_name")
         ttk.Label(row5, text="Total steps:").pack(side="left", padx=(12, 0))
-        self.total_steps_var = tk.StringVar(value="200000")
+        self.total_steps_var = tk.StringVar(
+            value=gui_state.run_value(self.state, "total_steps", "200000"))
         e = ttk.Entry(row5, textvariable=self.total_steps_var, width=10)
         e.pack(side="left", padx=6)
         gui_help.attach(e, None, "total_steps")
@@ -376,7 +394,8 @@ class ResidualTrainerGUI:
     def _build_car_picker(self, pad):
         row = ttk.Frame(self.training_tab); row.pack(fill="x", **pad)
         ttk.Label(row, text="Model:").pack(side="left")
-        self.car_model_var = tk.StringVar(value="")
+        self.car_model_var = tk.StringVar(
+            value=gui_state.run_value(self.state, "car_model", ""))
         self.car_model_combo = ttk.Combobox(row, textvariable=self.car_model_var,
                                             state="readonly", width=22)
         self.car_model_combo.pack(side="left", padx=6)
@@ -384,7 +403,8 @@ class ResidualTrainerGUI:
                                   lambda e: self._on_car_model_changed())
 
         ttk.Label(row, text="Trim:").pack(side="left", padx=(12, 0))
-        self.car_trim_var = tk.StringVar(value="")
+        self.car_trim_var = tk.StringVar(
+            value=gui_state.run_value(self.state, "car_trim", ""))
         self.car_trim_combo = ttk.Combobox(row, textvariable=self.car_trim_var,
                                            state="readonly", width=22)
         self.car_trim_combo.pack(side="left", padx=6)
@@ -392,7 +412,8 @@ class ResidualTrainerGUI:
                                  lambda e: self._on_car_trim_changed())
 
         ttk.Label(row, text="Custom:").pack(side="left", padx=(12, 0))
-        self.car_custom_var = tk.StringVar(value="")
+        self.car_custom_var = tk.StringVar(
+            value=gui_state.run_value(self.state, "car_custom", ""))
         self.car_custom_combo = ttk.Combobox(row, textvariable=self.car_custom_var,
                                              state="disabled", width=22)
         self.car_custom_combo.pack(side="left", padx=6)
@@ -425,6 +446,9 @@ class ResidualTrainerGUI:
         self._car_model_by_display = unique_model_labels(models)
         self.car_model_combo["values"] = sorted(self._car_model_by_display)
         if self.car_model_var.get() not in self._car_model_by_display and models:
+            # Only fall back when the remembered model is genuinely gone (a
+            # different install, a removed car) -- otherwise the restored
+            # selection would be overwritten on every startup.
             self.car_model_var.set(sorted(self._car_model_by_display)[0])
         self._on_car_model_changed()
 
@@ -589,24 +613,64 @@ class ResidualTrainerGUI:
         log.info("removed %s from game (%s)", run.run_name, run.model)
         self.output_status_var.set(f"Removed {run.run_name} from the game.")
 
+    def save_state(self):
+        """Write the Training tab down. Called on START, on CALIBRATE and on
+        close -- cheap enough to do often, and doing it on launch means a run
+        that crashes still leaves its settings behind."""
+        values = {
+            "algo": self.algo_var.get(),
+            "net_arch": self.net_arch_var.get(),
+            "speeds": self.speeds_var.get(),
+            "pedal_random": self.pedal_random_var.get(),
+            "pedal_spec": self.pedal_spec_var.get(),
+            "grip": self.grip_var.get(),
+            "corner": self.corner_var.get(),
+            "reward": self.reward_var.get(),
+            "run_name": self.run_name_var.get(),
+            "total_steps": self.total_steps_var.get(),
+            "car_model": self.car_model_var.get(),
+            "car_trim": self.car_trim_var.get(),
+            "car_custom": self.car_custom_var.get(),
+        }
+        gui_state.remember_run(self.state, values)
+        if self.field_vars:
+            gui_state.remember_algo(self.state, self.algo_var.get(),
+                                    {k: v.get() for k, v in self.field_vars.items()})
+        try:
+            gui_state.save(self.state, GUI_STATE_PATH)
+        except OSError as e:
+            log.warning("could not save gui state: %s", e)
+
+    def on_close(self):
+        self.save_state()
+        self.root.destroy()
+
     def _tk_exception(self, exc_type, exc, tb):
         log.error("tkinter callback exception: %s: %s", exc_type.__name__, exc,
                   exc_info=(exc_type, exc, tb))
         messagebox.showerror("GUI error", f"{exc_type.__name__}: {exc}\n\nSee logs\\gui.log")
 
     def _swap_algo_panel(self):
+        # Whatever is on screen belongs to the algorithm that WAS selected, so
+        # bank it before rebuilding -- otherwise switching to the other
+        # algorithm and back silently restores defaults over tuned values.
+        if self.field_vars and getattr(self, "_panel_algo", None):
+            gui_state.remember_algo(self.state, self._panel_algo,
+                                    {k: v.get() for k, v in self.field_vars.items()})
         for child in self.algo_panel.winfo_children():
             child.destroy()
         self.field_vars = {}
+        self._panel_algo = self.algo_var.get()
         defaults = SAC_DEFAULTS if self.algo_var.get() == "sac" else PPO_DEFAULTS
         labels = SAC_LABELS if self.algo_var.get() == "sac" else PPO_LABELS
+        values = gui_state.algo_values(self.state, self._panel_algo, defaults)
         for key, default in defaults.items():
             frame = ttk.Frame(self.algo_panel)
             frame.pack(side="left", padx=4)
             algo = self.algo_var.get()
             lbl = ttk.Label(frame, text=labels[key] + ":")
             lbl.pack(side="top")
-            var = tk.StringVar(value=str(default))
+            var = tk.StringVar(value=values[key])
             entry = ttk.Entry(frame, textvariable=var, width=10)
             entry.pack(side="top")
             # Both label and box: the label is the wider target, and it is what
@@ -648,6 +712,7 @@ class ResidualTrainerGUI:
 
     def start(self):
         settings = self._collect_settings()
+        self.save_state()
         log.info("START pressed: settings=%s", settings)
         problems = validate_settings(settings)
         if problems:
@@ -742,6 +807,7 @@ class ResidualTrainerGUI:
         it scores is worse than a missing one, because training consumes it
         without complaint. Same simulator validation and launch path as START."""
         settings = self._collect_settings()
+        self.save_state()
         problems = validate_calibration_settings(settings)
         if problems:
             log.warning("CALIBRATE refused: %s", problems)
@@ -851,7 +917,10 @@ class ResidualTrainerGUI:
 
 def main():
     root = tk.Tk()
-    ResidualTrainerGUI(root)
+    app = ResidualTrainerGUI(root)
+    # Without this the window manager destroys the window directly and the
+    # settings are never written.
+    root.protocol("WM_DELETE_WINDOW", app.on_close)
     root.mainloop()
 
 
