@@ -266,6 +266,14 @@ def make_venv(args):
                     + f"\n\nRun: python reference_runner.py --corner {args.corner}")
     log.info("corner: %s", "straight" if corner_spec is None else corner_spec)
 
+    forced = None
+    if args.force_action:
+        forced = [float(x) for x in args.force_action.split(",")]
+        if len(forced) != 2:
+            raise SystemExit(f"--force-action needs 2 values, got {args.force_action!r}")
+        log.warning("FORCED ACTION %s -- the policy is overridden every step; "
+                    "this is a diagnostic control run, not training", forced)
+
     def _make():
         pedal = parse_pedal_spec(args.pedal)
         env = ABSLearningEnvResidual(port=args.port, env_index=0,
@@ -274,7 +282,8 @@ def make_venv(args):
                                      calibration_table=table,
                                      grip_spec=grip_spec,
                                      grip_lead_seconds=args.grip_lead,
-                                     corner_spec=corner_spec)
+                                     corner_spec=corner_spec,
+                                     force_action=forced)
         env.fixed_mph = parse_speeds(args.speeds)
         return env
 
@@ -397,6 +406,10 @@ def parse_args():
                         '"0.6", a list "0.5,0.75,1.0" (randomized among them), or '
                         'a range "0.4-1.0" (continuous random; incompatible with '
                         '--reward normalized)')
+    p.add_argument("--force-action", default=None,
+                   help='override the policy every step, e.g. "0,0" for pure '
+                        "slam (zero release = full pedal). Diagnostic control "
+                        "runs only -- the policy still trains on garbage.")
     p.add_argument("--corner", default="straight",
                    help='brake in a constant-radius turn: radius in metres, '
                         '"50" / "50L" / "50R". "straight" (default) = no corner. '

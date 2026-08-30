@@ -259,7 +259,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
     def __init__(self, *args, sim_config=None, vehicle_pc=None, pedal_range=None,
                  reward_spec=None, calibration_table=None, grip=1.0,
                  radius_m=None, grip_spec=None, grip_lead_seconds=0.0,
-                 corner_spec=None, **kwargs):
+                 corner_spec=None, force_action=None, **kwargs):
         # self._sim_config must exist before super().__init__() runs -- the
         # parent's __init__ calls self._apply_performance_tuning(...) (our
         # override below) partway through its own body.
@@ -283,6 +283,13 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
                 f"calibration table has none either -- run the steering seek "
                 f"(reference_runner.py --corner ...) before training this corner.")
         self._heading = None
+        # Overrides the policy's action every step. force_action=(0,0) is the
+        # pure-slam control: zero release means full pedal, the genuine
+        # worst-case brake input, which is what a "floor" measurement needs --
+        # a policy sampling releases uniformly on [0,1] brakes at roughly half
+        # pedal and is nowhere near the grip limit.
+        self._force_action = (None if force_action is None
+                              else np.asarray(force_action, dtype=np.float64))
         # None => "stock": grip is never touched, and _draw_grip returns 1.0 so
         # the calibration key still says grip=1.000 (which is what stock IS).
         self._grip_spec = grip_spec
@@ -508,6 +515,8 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
 
     def step(self, action):
         self._advance_corner_target()
+        if self._force_action is not None:
+            action = self._force_action
         fr, fl, rr, rl = residual_to_brakes(np.asarray(action, dtype=np.float64),
                                             self.episode_pedal)
         # Parent step() maps its 4-float action via brakes = 0.01+0.99*a then
