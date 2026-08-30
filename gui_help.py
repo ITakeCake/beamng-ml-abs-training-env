@@ -22,17 +22,23 @@ RUN_HELP = {
         "use the normalized reward -- press 'Calibrate baselines' first."
     ),
     "pedal_random": (
-        "Vary how hard the driver presses the brake pedal each attempt.\n\n"
-        "Off: the pedal is always mashed to the floor (100%).\n"
-        "On: a random amount within the range you set, e.g. 0.4-1.0 means\n"
-        "anywhere from 40% to 100%.\n\n"
+        "Vary how hard the driver presses the brake pedal, ONE value per\n"
+        "attempt.\n\n"
+        "Off: the pedal is mashed to the floor (100%) every time.\n"
+        "On:  each attempt picks a random amount from the range and HOLDS it\n"
+        "     for that whole stop -- 62% this time, 87% the next. The pedal\n"
+        "     does not move during a stop.\n\n"
         "Real drivers do not always slam the pedal, so this teaches the\n"
-        "controller to cope with a half-pressed pedal too. It makes learning\n"
-        "slower but the result more realistic."
+        "controller to work from a half-pressed pedal as well as a floored\n"
+        "one. It sees the current pedal position, so it can adapt rather than\n"
+        "guess.\n\n"
+        "Learning is slower, because it has to handle every pedal position\n"
+        "instead of just one."
     ),
     "pedal_spec": (
-        "The range of pedal pressure to pick from, as low-high.\n\n"
-        "0.4-1.0 = between 40% and 100% pressed.\n"
+        "The range to pick this attempt's pedal position from, as low-high.\n\n"
+        "0.4-1.0 = somewhere between 40% and 100% pressed. One value is drawn\n"
+        "at the start of each attempt and held for the whole stop.\n\n"
         "Only used when 'Randomize pedal' is ticked."
     ),
     "grip": (

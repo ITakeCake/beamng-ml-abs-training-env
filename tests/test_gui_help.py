@@ -64,3 +64,13 @@ def test_the_learning_starts_trap_is_documented():
     mistake that produced a run of pure random actions in this project."""
     text = gui_help.help_for("sac", "learning_starts").lower()
     assert "never learns" in text or "never learn" in text
+
+
+def test_pedal_help_states_it_is_constant_within_an_attempt():
+    """The genuinely ambiguous one: "randomize pedal" reads equally well as
+    "one value per stop" or "jittering during the stop". It is the former
+    (drawn in reset(), held all episode), and the text has to say so."""
+    text = gui_help.help_for("sac", "pedal_random").lower()
+    assert "one value per" in text or "one value" in text
+    assert "does not move during" in text
+    assert gui_help.help_for("sac", "pedal_spec").lower().count("held") >= 1
