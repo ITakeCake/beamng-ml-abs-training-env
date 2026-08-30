@@ -111,6 +111,32 @@ RUN_HELP = {
         "PPO = learns only from recent attempts. Steadier, but needs many more\n"
         "      of them, so it is slower in wall-clock time for this project."
     ),
+    "deterministic": (
+        "ON (normal): the simulation advances exactly one 5 ms tick per\n"
+        "decision, so every run is reproducible and every episode holds the\n"
+        "same number of decisions.\n\n"
+        "OFF (experimental): the engine free-runs and the policy reads state\n"
+        "whenever it can. Measured on PPO-05, stepping cost 62 ms of real time\n"
+        "for every 5 ms of simulation -- about 1/14th real time, nearly all of\n"
+        "it spent waiting on network round trips rather than on physics.\n\n"
+        "What stays true: the brake result. Onset and distance are measured in\n"
+        "Lua at 2 kHz, which does not care how fast Python keeps up.\n\n"
+        "What stops being true: 'steps' and 'stop_time_s' in the episode log.\n"
+        "They assume 200 decisions per second. Compare free-running runs to\n"
+        "stepped ones by avg_g only.\n\n"
+        "The trade: more episodes per hour, fewer decisions inside each one."
+    ),
+    "train_speed_factor": (
+        "How much faster than real time to run physics while free-running.\n\n"
+        "Only does anything when 'Deterministic training' is OFF. While\n"
+        "stepping, physics is paused between decisions -- there is no clock\n"
+        "running for a multiplier to act on.\n\n"
+        "Higher is not simply better. Round trips cost what they cost, so at\n"
+        "10x the policy gets roughly a tenth as many decisions per stop as it\n"
+        "does at 1x. Calibration measured 4x, 10x and 25x at the same ~4s per\n"
+        "stop, so the engine had already saturated below 4x.\n\n"
+        "Start at 1 to isolate the effect of free-running itself, then raise."
+    ),
     "fast_calibration": (
         "Measure calibration stops free-running under a physics speed factor,\n"
         "instead of stepping the simulation one tick at a time.\n\n"

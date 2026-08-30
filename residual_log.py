@@ -28,6 +28,30 @@ class _ShortName(logging.Filter):
         return True
 
 
+# beamngpy logs one INFO line per bng.step() call. At FRAME_SKIP=1 that is one
+# line per 5 ms of simulated time: PPO-05 wrote 475,355 "Advancing the simulation
+# by 1 steps" lines into a 37 MB log for a single run, which buries the ~450 lines
+# that actually say what happened and costs a formatted record + file write on
+# every step of the hot loop.
+BEAMNGPY_LOGGERS = ("beamngpy", "beamngpy.BeamNGpy", "beamngpy.Vehicle",
+                    "beamngpy.Scenario", "beamngpy.Camera", "beamngpy.Sensor")
+
+
+def quiet_beamngpy(level=logging.WARNING):
+    """Raise beamngpy's log level so per-step chatter stops reaching handlers.
+
+    WARNING keeps connection failures and genuine problems visible; only the
+    routine step/poll narration is dropped. Called for its side effect on the
+    named loggers rather than the root, so the trainer's own INFO lines are
+    untouched."""
+    for name in BEAMNGPY_LOGGERS:
+        lg = logging.getLogger(name)
+        lg.setLevel(level)
+        # propagate stays on: the records that DO pass the level filter should
+        # still reach the run's file handler.
+    return level
+
+
 def setup_logging(file_path, component="main", level=logging.INFO, console=True):
     """Configure the root logger once: UTF-8 file + console, uncaught-exception
     hook. Idempotent -- a second call with the same file adds no handlers."""
@@ -69,6 +93,9 @@ def setup_logging(file_path, component="main", level=logging.INFO, console=True)
                      "".join(traceback.format_exception(exc_type, exc, tb)))
         sys.__excepthook__(exc_type, exc, tb)
     sys.excepthook = _hook
+    # After handlers exist, so a beamngpy logger configured by an earlier import
+    # cannot re-lower itself past this point.
+    quiet_beamngpy()
     return log
 
 

@@ -323,7 +323,9 @@ def make_venv(args):
                                      grip_spec=grip_spec,
                                      grip_lead_seconds=args.grip_lead,
                                      corner_spec=corner_spec,
-                                     force_action=forced)
+                                     force_action=forced,
+                                     deterministic=args.deterministic,
+                                     train_speed_factor=args.train_speed_factor)
         env.fixed_mph = parse_speeds(args.speeds)
         return env
 
@@ -480,6 +482,18 @@ def parse_args():
                    help='hidden layers of the policy/value networks: "3x256" '
                         'or "512,256,128". Default 3x256 matches the reference '
                         "trainers. A resumed run must match its checkpoint.")
+    p.add_argument("--no-deterministic", dest="deterministic",
+                   action="store_false", default=True,
+                   help="Free-run the engine instead of stepping it. Each policy "
+                        "decision then costs one round trip instead of three, but "
+                        "arrives once per round trip rather than once per 5 ms. "
+                        "The 2 kHz brake metric is unaffected; 'steps' and "
+                        "'stop_time_s' become meaningless. EXPERIMENTAL.")
+    p.add_argument("--train-speed-factor", type=float, default=1.0,
+                   help="Physics speed multiplier while free-running (needs "
+                        "--no-deterministic). The engine saturates near 4-5x on "
+                        "this machine, so larger values mainly cut how many "
+                        "decisions the policy gets per stop.")
     p.add_argument("--corner", default="straight",
                    help='brake in a constant-radius turn: radius in metres, '
                         '"50" / "50L" / "50R". "straight" (default) = no corner. '

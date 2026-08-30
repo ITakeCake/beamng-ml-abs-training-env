@@ -30,6 +30,8 @@ import os
 import random
 import time
 import numpy as np
+
+import sim_clock
 import gymnasium as gym
 import abs_env
 import abs_env_incar
@@ -259,7 +261,8 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
     def __init__(self, *args, sim_config=None, vehicle_pc=None, pedal_range=None,
                  reward_spec=None, calibration_table=None, grip=1.0,
                  radius_m=None, grip_spec=None, grip_lead_seconds=0.0,
-                 corner_spec=None, force_action=None, **kwargs):
+                 corner_spec=None, force_action=None, deterministic=True,
+                 train_speed_factor=1.0, **kwargs):
         # self._sim_config must exist before super().__init__() runs -- the
         # parent's __init__ calls self._apply_performance_tuning(...) (our
         # override below) partway through its own body.
@@ -318,6 +321,21 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         if vehicle_pc:
             log.info("vehicle_pc override: %s", vehicle_pc)
         super().__init__(*args, **kwargs)
+        # AFTER the parent built self.bng and ran its scenario setup: the setup
+        # is a handful of calls and wants ordinary stepping, while the seam is
+        # only about the per-step hot loop. sim_clock.wrap returns the handle
+        # untouched when deterministic, so the default path is byte-identical.
+        self.deterministic = bool(deterministic)
+        self.train_speed_factor = float(train_speed_factor)
+        self.bng = sim_clock.wrap(self.bng, deterministic=self.deterministic,
+                                  speed_factor=self.train_speed_factor)
+        if not self.deterministic:
+            log.warning(
+                "FREE-RUNNING training at %.4gx: the policy decides once per "
+                "round trip instead of once per 5 ms, so 'steps' and "
+                "'stop_time_s' no longer mean what they mean in a "
+                "deterministic run. Compare these episodes by avg_g only.",
+                self.train_speed_factor)
         self.pedal_range = pedal_range          # None => constant 1.0
         self.episode_pedal = 1.0
         low = np.concatenate([self.observation_space.low, [0.0]]).astype(np.float32)

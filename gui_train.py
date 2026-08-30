@@ -11,6 +11,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import gui_help
+import train_monitor
 import gui_state
 import calibration_progress as calprog
 from gui_cmd import (build_cmd, build_calibration_cmd, validate_settings,
@@ -70,6 +71,7 @@ class ResidualTrainerGUI:
         self.root = root
         root.title("Residual ABS Trainer")
         self.proc = None
+        self._monitor = None
         self.field_vars = {}
         self._active_run = None          # run name of the process we launched
         self._log_seen = False           # per-run log-file-appeared transition
@@ -189,6 +191,30 @@ class ResidualTrainerGUI:
         ttk.Label(row_fast, text="x speed  (~11x faster per stop; affects "
                   "calibration only, not training)").pack(side="left")
 
+        row_det = ttk.Frame(self.training_tab)
+        row_det.pack(fill="x", **pad)
+        self.determ_var = tk.BooleanVar(
+            value=bool(gui_state.run_value(self.state, "deterministic", True)))
+        cbd = ttk.Checkbutton(row_det, text="Deterministic training",
+                              variable=self.determ_var,
+                              command=self._sync_determinism_row)
+        cbd.pack(side="left")
+        gui_help.attach(cbd, None, "deterministic")
+        # Built once and packed/forgotten, rather than created on demand: a
+        # rebuilt widget loses the value the user typed into it.
+        self.freerun_frame = ttk.Frame(row_det)
+        ttk.Label(self.freerun_frame, text="Engine speed:").pack(side="left",
+                                                                 padx=(12, 0))
+        self.train_speed_var = tk.StringVar(
+            value=str(gui_state.run_value(self.state, "train_speed_factor", "1")))
+        e = ttk.Entry(self.freerun_frame, textvariable=self.train_speed_var, width=6)
+        e.pack(side="left", padx=6)
+        gui_help.attach(e, None, "train_speed_factor")
+        ttk.Label(self.freerun_frame,
+                  text="x  (EXPERIMENTAL: free-running. avg_g stays valid; "
+                       "step counts do not)").pack(side="left")
+        self._sync_determinism_row()
+
         row4c = ttk.Frame(self.training_tab)
         row4c.pack(fill="x", **pad)
         ttk.Label(row4c, text="Reward:").pack(side="left")
@@ -230,6 +256,8 @@ class ResidualTrainerGUI:
         row6.pack(fill="x", **pad)
         ttk.Button(row6, text="START", command=self.start).pack(side="left")
         ttk.Button(row6, text="GRACEFUL STOP", command=self.stop).pack(side="left", padx=6)
+        ttk.Button(row6, text="Show monitor",
+                   command=self._show_monitor).pack(side="left", padx=6)
         ttk.Button(row6, text="Calibrate baselines",
                    command=self.calibrate).pack(side="left", padx=(18, 0))
         self.status_var = tk.StringVar(value="idle")
@@ -242,6 +270,52 @@ class ResidualTrainerGUI:
         ttk.Label(row7, textvariable=self.monitor_var).pack(side="left", padx=6, pady=4)
 
         self.root.after(1000, self._poll_monitor)
+
+    def _open_monitor(self, settings=None):
+        """Show the live monitor for the current run, reusing the window if one
+        is already open -- a second Toplevel would poll the same file twice and
+        leave the user guessing which is current."""
+        try:
+            total = int(str((settings or self._collect_settings())["total_steps"]))
+        except (KeyError, TypeError, ValueError):
+            total = 0
+        run_name = self._active_run or self.run_name_var.get()
+        if self._monitor is not None:
+            try:
+                self._monitor.close()
+            except Exception:
+                pass
+            self._monitor = None
+        try:
+            self._monitor = train_monitor.TrainMonitor(
+                self.root,
+                train_monitor.file_source(self._run_dir(), total_steps=total,
+                                          run_name=run_name),
+                title=f"Training monitor - {run_name}",
+                total_steps=total, on_stop=self.stop)
+        except Exception as e:
+            # A monitor is a convenience; failing to build one must never take
+            # the run down with it.
+            log.warning("monitor window failed to open: %s: %s",
+                        type(e).__name__, e)
+            self._monitor = None
+
+    def _show_monitor(self):
+        if self._monitor is None:
+            self._open_monitor()
+        else:
+            self._monitor.show()
+
+    def _sync_determinism_row(self):
+        """Show the engine-speed box only when it can do anything.
+
+        A speed factor is meaningless while stepping: physics advances only when
+        Python asks, so there is no free-running clock to multiply. Leaving the
+        box visible-but-inert would invite exactly the misreading it describes."""
+        if self.determ_var.get():
+            self.freerun_frame.pack_forget()
+        else:
+            self.freerun_frame.pack(side="left")
 
     def _build_simulator_tab(self, pad):
         cfg = load_sim_config(SETTINGS_PATH)
@@ -643,6 +717,8 @@ class ResidualTrainerGUI:
             "grip": self.grip_var.get(),
             "corner": self.corner_var.get(),
             "reward": self.reward_var.get(),
+            "deterministic": self.determ_var.get(),
+            "train_speed_factor": self.train_speed_var.get(),
             "run_name": self.run_name_var.get(),
             "total_steps": self.total_steps_var.get(),
             "car_model": self.car_model_var.get(),
@@ -723,6 +799,8 @@ class ResidualTrainerGUI:
             grip=self.grip_var.get(),
             corner=self.corner_var.get(),
             reward=self.reward_var.get(),
+            deterministic=self.determ_var.get(),
+            train_speed_factor=self.train_speed_var.get(),
         )
         for key, var in self.field_vars.items():
             settings[key] = var.get()
@@ -800,6 +878,7 @@ class ResidualTrainerGUI:
         self._last_parse_err = None
         log.info("launched trainer pid=%d run=%s cmd=%s", self.proc.pid, self._active_run, cmd)
         self.status_var.set(f"running (pid {self.proc.pid})")
+        self._open_monitor(settings)
 
     def _check_car_has_ml_abs(self, model_name, pc_name):
         """Problem string if the selected configuration cannot run in-car

@@ -68,6 +68,12 @@ def build_cmd(settings):
     if settings.get("net_arch"):
         cmd += ["--net-arch", str(settings["net_arch"])]
 
+    # Absent key => deterministic, which is what every run before this switch
+    # existed did. Only the opt-out is passed, so old settings files are safe.
+    if not settings.get("deterministic", True):
+        cmd += ["--no-deterministic",
+                "--train-speed-factor", str(settings.get("train_speed_factor", 1))]
+
     return cmd
 
 
@@ -155,6 +161,20 @@ def validate_calibration_settings(settings):
 
 def validate_settings(settings):
     problems = []
+    if not settings.get("deterministic", True):
+        raw = str(settings.get("train_speed_factor", "1")).strip()
+        try:
+            factor = float(raw)
+        except ValueError:
+            problems.append(f"engine speed must be a number, got {raw!r}")
+        else:
+            if factor < 1.0:
+                problems.append(
+                    f"engine speed {factor:g}x is below real time; use 1 or more")
+            elif factor > 50.0:
+                problems.append(
+                    f"engine speed {factor:g}x is beyond anything measured; the "
+                    f"engine saturated near 4-5x on this machine")
     try:
         parse_speeds(settings["speeds"])
     except ValueError as e:
