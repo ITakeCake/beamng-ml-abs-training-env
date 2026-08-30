@@ -1,13 +1,34 @@
 """Settings dict <-> train_residual.py argv translation, plus pre-launch validation.
 No game/GUI imports -- pure functions so the command builder is independently testable."""
 
+import os
 import sys
 
 from residual_core import (parse_speeds, parse_pedal_spec, parse_grip_spec,
                            parse_net_arch)
 from corner import parse_corner_spec
 
-PYTHON = sys.executable
+def _console_python():
+    """sys.executable, but never pythonw.exe.
+
+    The GUI is launched with pythonw so it has no console window, and a child
+    started from it inherits that interpreter. pythonw sets sys.stdout to None,
+    and Stable-Baselines3's verbose=1 logger writes to stdout unconditionally --
+    it raises "Expected file or str, got None" the moment learn() starts, after
+    the game has booted and driven a reset. The trainer runs in its own console
+    window anyway, so it wants the console interpreter regardless of how the GUI
+    itself was started."""
+    exe = sys.executable or ""
+    base = os.path.basename(exe).lower()
+    if base.startswith("pythonw"):
+        candidate = os.path.join(os.path.dirname(exe),
+                                 base.replace("pythonw", "python", 1))
+        if os.path.isfile(candidate):
+            return candidate
+    return exe
+
+
+PYTHON = _console_python()
 
 # per-algo flags: dict key -> CLI flag (underscores become dashes)
 SAC_KEYS = ["lr", "buffer_size", "tau", "target_entropy", "learning_starts", "train_freq"]

@@ -126,3 +126,31 @@ def test_a_fixed_grip_is_a_single_calibratable_level():
 
 def test_reps_are_passed_through():
     assert build_calibration_cmd(_base(), car="etk800", reps=5)[-1] == "5"
+
+
+# ------------------------------------------------- console interpreter
+def test_the_trainer_never_inherits_pythonw(monkeypatch, tmp_path):
+    """A run died with "Expected file or str, got None" after BeamNG had booted
+    and driven a reset: the GUI runs under pythonw (no console window), the
+    trainer inherited it, and pythonw sets sys.stdout to None -- which SB3's
+    verbose=1 logger writes to unconditionally."""
+    import gui_cmd
+    (tmp_path / "python.exe").write_text("")
+    monkeypatch.setattr(gui_cmd.sys, "executable", str(tmp_path / "pythonw.exe"))
+    assert os.path.basename(gui_cmd._console_python()) == "python.exe"
+
+
+def test_a_normal_python_is_left_alone(monkeypatch, tmp_path):
+    import gui_cmd
+    exe = str(tmp_path / "python.exe")
+    monkeypatch.setattr(gui_cmd.sys, "executable", exe)
+    assert gui_cmd._console_python() == exe
+
+
+def test_pythonw_with_no_console_sibling_falls_back_rather_than_inventing_one(
+        monkeypatch, tmp_path):
+    """Returning a path that does not exist would fail worse than the original."""
+    import gui_cmd
+    exe = str(tmp_path / "pythonw.exe")
+    monkeypatch.setattr(gui_cmd.sys, "executable", exe)
+    assert gui_cmd._console_python() == exe
