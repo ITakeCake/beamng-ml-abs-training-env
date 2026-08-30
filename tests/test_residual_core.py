@@ -31,10 +31,17 @@ def test_parse_speeds_rejects_junk():
             parse_speeds(bad)
 
 def test_parse_pedal_off_and_range_and_scalar():
+    """Returns a PedalSpec now, not a tuple: "0.5,1.0" (two levels) and
+    "0.5-1.0" (everything between) are both two numbers, and the difference
+    decides whether calibrating it takes 14 minutes or 6 hours."""
     assert parse_pedal_spec("off") is None
     assert parse_pedal_spec("") is None
-    assert parse_pedal_spec("0.4-1.0") == (0.4, 1.0)
-    assert parse_pedal_spec("0.7") == (0.7, 0.7)
+    rng = parse_pedal_spec("0.4-1.0")
+    assert (rng.mode, rng.values) == ("range", (0.4, 1.0))
+    fixed = parse_pedal_spec("0.7")
+    assert (fixed.mode, fixed.values) == ("fixed", (0.7,))
+    lst = parse_pedal_spec("0.5,0.75,1.0")
+    assert (lst.mode, lst.values) == ("list", (0.5, 0.75, 1.0))
 
 def test_parse_pedal_rejects_bad():
     for bad in ("0.05", "1.2", "0.9-0.4", "x"):

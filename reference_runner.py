@@ -179,7 +179,7 @@ class ReferenceRunner:
         log.info("installed telemetry + reference cars -> %s", user_root)
 
     def measure_stop(self, speed_mph, grip=1.0, radius_m=STRAIGHT, lead_seconds=0.0,
-                     steering=None):
+                     steering=None, pedal=1.0):
         """One reference stop. Returns the standard 2 kHz brake-event result.
 
         `steering` is the signed open-loop angle for a corner (None = straight).
@@ -269,10 +269,10 @@ class ReferenceRunner:
             self.vehicle.sensors.poll()
             spd = float(self.vehicle.sensors["electrics"].get("airspeed", 999.0))
             if not neutral_dropped and spd < 1.118:      # 2.5 mph
-                self.vehicle.control(brake=1.0, gear=0)
+                self.vehicle.control(brake=float(pedal), gear=0)
                 neutral_dropped = True
             else:
-                self.vehicle.control(brake=1.0)
+                self.vehicle.control(brake=float(pedal))
             self.bng.step(1)
             self.vehicle.sensors.poll()
             spd = float(self.vehicle.sensors["electrics"].get("airspeed", 999.0))
@@ -290,6 +290,7 @@ class ReferenceRunner:
             "reference": self.reference,
             "speed_mph": speed_mph,
             "grip": float(grip),
+            "pedal": float(pedal),
             "radius_m": radius_m,
             "steering": None if steering is None else float(steering),
             "grip_applied": float(e.get("tel_grip_mult", 1.0)),
@@ -434,7 +435,8 @@ class ReferenceRunner:
 
 
 def run_calibration(sim_cfg, car, speeds, reps, grips=(1.0,), radius_m=STRAIGHT,
-                    out_dir=None, port=None, lead_seconds=0.0, direction=LEFT):
+                    out_dir=None, port=None, lead_seconds=0.0, direction=LEFT,
+                    pedals=(1.0,)):
     """Measures both references at every (speed, grip) and writes the table.
 
     For a corner, the steering angle is sought FIRST -- once per (speed, grip),
@@ -469,18 +471,25 @@ def run_calibration(sim_cfg, car, speeds, reps, grips=(1.0,), radius_m=STRAIGHT,
         try:
             for mph in speeds:
                 for grip in grips:
-                    key = config_key(grip=grip, speed_mph=mph, radius_m=radius_m)
+                    # Steering belongs to the geometry, so it is sought and
+                    # stored once per (grip, speed, radius) -- at the full-pedal
+                    # key -- and reused for every pedal level below.
+                    geom_key = config_key(grip=grip, speed_mph=mph, radius_m=radius_m)
                     steering = (None if radius_m is STRAIGHT
-                                else table.steering_for(key))
-                    values = []
-                    for rep in range(reps):
-                        r = runner.measure_stop(mph, grip=grip, radius_m=radius_m,
-                                                lead_seconds=lead_seconds,
-                                                steering=steering)
-                        values.append(r["avg_g_arc"])
-                        time.sleep(0.5)
-                    table.put(key, reference, summarize(values))
-                    log.info("calibrated %s %s: %s", reference, key, summarize(values))
+                                else table.steering_for(geom_key))
+                    for pedal in pedals:
+                        key = config_key(grip=grip, speed_mph=mph,
+                                         radius_m=radius_m, pedal=pedal)
+                        values = []
+                        for rep in range(reps):
+                            r = runner.measure_stop(mph, grip=grip, radius_m=radius_m,
+                                                    lead_seconds=lead_seconds,
+                                                    steering=steering, pedal=pedal)
+                            values.append(r["avg_g_arc"])
+                            time.sleep(0.5)
+                        table.put(key, reference, summarize(values))
+                        log.info("calibrated %s %s: %s", reference, key,
+                                 summarize(values))
         finally:
             runner.close()
         time.sleep(2)
@@ -507,6 +516,10 @@ def parse_args():
     p.add_argument("--grip-lead", type=float, default=0.0,
                    help="apply grip this many seconds before brake onset "
                         "(0 = same physics tick); must match training")
+    p.add_argument("--pedals", default="1.0",
+                   help='driver pedal positions to calibrate, e.g. "1.0,0.75,0.5". '
+                        "Each needs its own references, since a half-pedal stop "
+                        "cannot reach the full-pedal lockup floor.")
     p.add_argument("--corner", default="straight",
                    help='corner radius in metres, "50" / "50L" / "50R"; '
                         '"straight" (default) = no corner')
@@ -539,7 +552,9 @@ def main():
     speeds = [int(s.strip()) for s in args.speeds.split(",") if s.strip()]
     grips = [round(float(g.strip()), 3) for g in args.grips.split(",") if g.strip()]
     corner = parse_corner_spec(args.corner)
+    pedals = [round(float(x.strip()), 2) for x in args.pedals.split(",") if x.strip()]
     table, path = run_calibration(cfg, args.car, speeds, args.reps, grips=grips,
+                                  pedals=pedals,
                                   radius_m=STRAIGHT if corner is None else corner.radius_m,
                                   direction=LEFT if corner is None else corner.direction,
                                   port=args.port, lead_seconds=args.grip_lead)

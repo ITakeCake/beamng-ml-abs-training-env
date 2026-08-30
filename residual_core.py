@@ -31,16 +31,100 @@ def parse_speeds(text):
     return out
 
 
+# Pedal is quantised to 2 decimals, and that is a HARD constraint rather than a
+# tidiness choice: pedal position is part of the calibration key, so every
+# distinct value needs its own measured slam/stock pair (~7 min each). At 3
+# decimals a "0.5-1.0" range spans 501 levels and could never be calibrated;
+# at 2 it spans 51, and a sensible list of a handful is a morning's work.
+PEDAL_DP = 2
+PEDAL_MIN, PEDAL_MAX = 0.1, 1.0
+
+
+def _pedal_value(text):
+    v = round(float(text), PEDAL_DP)
+    if not (PEDAL_MIN <= v <= PEDAL_MAX):
+        raise ValueError(
+            f"pedal {v} out of range {PEDAL_MIN}..{PEDAL_MAX}")
+    return v
+
+
+class PedalSpec:
+    """How the driver's pedal position varies between episodes. One value is
+    drawn per episode and HELD for the whole stop -- it never moves mid-stop.
+
+    Three modes, mirroring GripSpec:
+      fixed  "0.6"            one concrete level
+      list   "0.5,0.75,1.0"   randomized between runs, but only among these
+      range  "0.5-1.0"        randomized continuously (51 levels at 2 dp)
+
+    `None` (not a PedalSpec) means off: always full pedal.
+
+    A tuple could not express this, because "0.5,1.0" (two levels) and
+    "0.5-1.0" (everything between) would both be a 2-tuple."""
+
+    def __init__(self, mode, values):
+        self.mode = mode
+        self.values = tuple(values)
+
+    @property
+    def needs_continuous_calibration(self):
+        """A range spans every 2-dp step in it, which is 51 levels for
+        0.5-1.0 and ~6 hours of calibration. Callers refuse this with a
+        normalized reward and say to use a list instead."""
+        return self.mode == "range" and self.values[0] != self.values[1]
+
+    def levels(self):
+        """The values this can draw -- exactly what needs calibrating."""
+        if self.mode in ("fixed", "list"):
+            return list(self.values)
+        lo, hi = self.values
+        if lo == hi:
+            return [lo]
+        step = 10 ** -PEDAL_DP
+        n = int(round((hi - lo) / step))
+        return [round(lo + i * step, PEDAL_DP) for i in range(n + 1)]
+
+    def draw(self, rng=None):
+        import random as _random
+        rng = rng or _random
+        if self.mode == "fixed":
+            return self.values[0]
+        if self.mode == "list":
+            return rng.choice(list(self.values))
+        lo, hi = self.values
+        return lo if lo == hi else round(rng.uniform(lo, hi), PEDAL_DP)
+
+    def __repr__(self):
+        return f"PedalSpec({self.mode}, {self.values})"
+
+    def __eq__(self, other):
+        return (isinstance(other, PedalSpec) and other.mode == self.mode
+                and other.values == self.values)
+
+
 def parse_pedal_spec(text):
+    """None = off (always full pedal). Otherwise a PedalSpec."""
     t = str(text).strip().lower()
     if t in ("", "off", "none"):
         return None
+    if "," in t:
+        vals = sorted({_pedal_value(p) for p in t.split(",") if p.strip()})
+        if not vals:
+            raise ValueError(f"bad pedal list: {text!r}")
+        return PedalSpec("list", vals)
     lo, _, hi = t.partition("-")
-    lo = float(lo)
-    hi = float(hi) if hi else lo
-    if not (0.1 <= lo <= 1.0 and 0.1 <= hi <= 1.0 and lo <= hi):
-        raise ValueError(f"bad pedal spec: {text!r}")
-    return (lo, hi)
+    if hi:
+        lo, hi = _pedal_value(lo), _pedal_value(hi)
+        if lo > hi:
+            raise ValueError(f"bad pedal spec: {text!r} (low above high)")
+        return PedalSpec("range", (lo, hi))
+    v = _pedal_value(lo)
+    return PedalSpec("fixed", (v,))
+
+
+def pedal_levels(spec):
+    """Every pedal value `spec` can draw. None for "off" (full pedal only)."""
+    return None if spec is None else spec.levels()
 
 
 # ---------------------------------------------------------------- tire grip

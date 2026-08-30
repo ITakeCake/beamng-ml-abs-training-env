@@ -128,7 +128,7 @@ def restore_reward_defaults():
         setattr(abs_env_incar, name, getattr(abs_env, name))
 
 
-def resolve_refs(spec, table, speed_mph, grip, radius_m):
+def resolve_refs(spec, table, speed_mph, grip, radius_m, pedal=1.0):
     """(slam_g, stock_g) for the current configuration, or None when the spec
     doesn't normalize. Raises rather than returning None for a normalized spec
     with no matching row: training against absolute anchors is exactly the bug
@@ -141,7 +141,7 @@ def resolve_refs(spec, table, speed_mph, grip, radius_m):
             "run 'Calibrate baselines' for this car first (refusing to score "
             "against absolute anchors).")
     return table.references(config_key(grip=grip, speed_mph=speed_mph,
-                                      radius_m=radius_m))
+                                      radius_m=radius_m, pedal=pedal))
 
 
 class GripArmInjector:
@@ -295,6 +295,8 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         self._grip_spec = grip_spec
         self.grip_lead_seconds = grip_lead_seconds
         self._pending_grip = None
+        # _current_refs() can be reached before reset() draws the first value.
+        self.episode_pedal = 1.0
         install_reward_spec(self._reward_spec, self._current_refs)
         log.info("reward spec: %s (hash=%s, normalize=%s, default=%s)",
                  self._reward_spec.name, self._reward_spec.hash(),
@@ -346,10 +348,14 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         super()._apply_performance_tuning(*cores)
 
     def _draw_pedal(self):
+        """One value per episode, held for the whole stop. Quantised to 2
+        decimals by the spec, because the drawn value keys a calibration row."""
         if self.pedal_range is None:
             return 1.0
-        lo, hi = self.pedal_range
-        return round(random.uniform(lo, hi), 3)
+        if hasattr(self.pedal_range, "draw"):
+            return self.pedal_range.draw()
+        lo, hi = self.pedal_range          # legacy (lo, hi) callers
+        return round(random.uniform(lo, hi), 2)
 
     def _draw_grip(self):
         """Returns the multiplier for this episode. With no spec (stock) the
@@ -373,7 +379,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         and radius) change per episode."""
         return resolve_refs(self._reward_spec, self._calibration,
                             getattr(self, "target_mph", None),
-                            self.grip, self.radius_m)
+                            self.grip, self.radius_m, self.episode_pedal)
 
     def _outcome(self):
         """Derive the parent's terminal outcome (info is always {}): the parent
@@ -457,6 +463,9 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # for the whole episode and a guaranteed "crash" that is pure
         # bookkeeping. Reusing the magnitude assumes the two directions are
         # symmetric, which holds on the flat, featureless calibration map.
+        # Steering is a property of the corner geometry, not of how hard the
+        # brakes are pressed, so it is looked up at the full-pedal key rather
+        # than duplicated per pedal level.
         return self._corner.direction * abs(self._calibration.steering_for(
             config_key(grip=self.grip, speed_mph=self.target_mph,
                        radius_m=self.radius_m)))

@@ -267,6 +267,42 @@ def make_venv(args):
                     + f"\n\nRun: python reference_runner.py --corner {args.corner}")
     log.info("corner: %s", "straight" if corner_spec is None else corner_spec)
 
+    # Pedal position keys a calibration row: the references are measured at a
+    # specific pedal, and a half-pedal stop physically cannot reach the
+    # full-pedal lockup floor. Scored against those anchors it lands far BELOW
+    # "locked wheels" however well it modulates -- indistinguishable from
+    # failing. So a normalized run needs a row per pedal level it can draw.
+    pedal_spec = parse_pedal_spec(args.pedal)
+    if spec.normalize and pedal_spec is not None:
+        if pedal_spec.needs_continuous_calibration:
+            raise SystemExit(
+                f"--pedal {args.pedal!r} draws continuously, which is "
+                f"{len(pedal_spec.levels())} distinct levels at 2 decimals -- each "
+                f"needs its own measured references (~7 min), so this cannot be "
+                f"calibrated.\n\n"
+                f'Use a list instead (e.g. --pedal "0.5,0.75,1.0") and calibrate '
+                f"those, or train with --reward v5.0.")
+        levels = pedal_spec.levels()
+        if table is not None:
+            missing = [config_key(grip=g, speed_mph=mph,
+                                  radius_m=None if corner_spec is None
+                                  else corner_spec.radius_m, pedal=pd)
+                       for mph in parse_speeds(args.speeds)
+                       for g in ((grip_spec.levels() or [1.0]) if grip_spec else [1.0])
+                       for pd in levels]
+            absent = [k for k in missing if k not in table.rows]
+            if absent:
+                joined = "\n  ".join(absent[:10])
+                more = (f"\n  ... and {len(absent) - 10} more"
+                        if len(absent) > 10 else "")
+                wanted = ",".join(str(p) for p in levels)
+                raise SystemExit(
+                    f"--reward {args.reward} normalizes against measured "
+                    f"references, but these pedal configurations have no "
+                    f"calibration row:\n  {joined}{more}\n\n"
+                    f'Run: python reference_runner.py --pedals "{wanted}"')
+    log.info("pedal: %s", "full (1.0)" if pedal_spec is None else pedal_spec)
+
     forced = None
     if args.force_action:
         forced = [float(x) for x in args.force_action.split(",")]
@@ -276,7 +312,7 @@ def make_venv(args):
                     "this is a diagnostic control run, not training", forced)
 
     def _make():
-        pedal = parse_pedal_spec(args.pedal)
+        pedal = pedal_spec
         env = ABSLearningEnvResidual(port=args.port, env_index=0,
                                      sim_config=cfg, vehicle_pc=args.vehicle_pc,
                                      pedal_range=pedal, reward_spec=spec,

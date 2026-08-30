@@ -29,11 +29,29 @@ REFERENCES = ("slam", "stock")
 MIN_REFERENCE_GAP_G = 0.01
 
 
-def config_key(grip, speed_mph, radius_m):
+# Pedal is quantised to 2 decimals (residual_core.PEDAL_DP) precisely because
+# it is part of this key: every distinct value needs its own measured
+# slam/stock pair, so 3 decimals would put a "0.5-1.0" range at 501
+# uncalibratable levels.
+PEDAL_DP = 2
+FULL_PEDAL = 1.0
+
+
+def config_key(grip, speed_mph, radius_m, pedal=FULL_PEDAL):
     """Canonical key for a configuration. Rounded so 1.0 and 1.000 (and 60 vs
-    60.0) can never produce two rows for the same physical setup."""
+    60.0) can never produce two rows for the same physical setup.
+
+    `pedal` is part of the configuration because the references are measured at
+    a specific pedal position: a half-pedal stop physically cannot reach the
+    full-pedal lockup floor, so scoring it against those anchors marks a
+    well-modulated stop as far worse than locking the wheels. Defaults to full
+    pedal, which is what every row measured before this existed used, and the
+    full-pedal key keeps its original text so those rows still resolve."""
     r = "straight" if radius_m in (None, 0) else f"{float(radius_m):.1f}"
-    return f"grip={float(grip):.3f}|speed={float(speed_mph):.1f}|radius={r}"
+    base = f"grip={float(grip):.3f}|speed={float(speed_mph):.1f}|radius={r}"
+    if round(float(pedal), PEDAL_DP) == FULL_PEDAL:
+        return base
+    return f"{base}|pedal={float(pedal):.2f}"
 
 
 def summarize(values):

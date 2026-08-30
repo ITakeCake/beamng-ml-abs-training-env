@@ -36,10 +36,18 @@ RUN_HELP = {
         "instead of just one."
     ),
     "pedal_spec": (
-        "The range to pick this attempt's pedal position from, as low-high.\n\n"
-        "0.4-1.0 = somewhere between 40% and 100% pressed. One value is drawn\n"
-        "at the start of each attempt and held for the whole stop.\n\n"
-        "Only used when 'Randomize pedal' is ticked."
+        "Which pedal positions to draw from. One is picked per attempt and\n"
+        "held for the whole stop.\n\n"
+        "0.5,0.75,1.0  a LIST -- only these. Use this one.\n"
+        "0.6           one fixed level\n"
+        "0.5-1.0       a range -- anything between, in 0.01 steps\n\n"
+        "Values snap to 2 decimals, because each distinct pedal level needs\n"
+        "its own measured baseline (about 7 minutes) before the normalized\n"
+        "reward can score it. Six listed levels is ~40 minutes; the range\n"
+        "0.5-1.0 is 51 levels and about 5 hours, so it is refused with the\n"
+        "normalized reward.\n\n"
+        "Press 'Calibrate baselines' after setting this -- it measures exactly\n"
+        "the levels listed here."
     ),
     "grip": (
         "How slippery the road is, by scaling tyre grip.\n\n"

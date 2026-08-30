@@ -89,6 +89,15 @@ def build_calibration_cmd(settings, car, reps=3):
             cmd += ["--grips", ",".join(str(g) for g in levels)]
     if settings.get("corner"):
         cmd += ["--corner", str(settings["corner"])]
+    # Pedal keys a calibration row too: references measured at full pedal do
+    # not describe a half-pedal stop, which physically cannot reach the
+    # full-pedal lockup floor. Only the levels the training run can actually
+    # draw are measured -- "off" means full pedal, which is the default.
+    if settings.get("pedal_random") and settings.get("pedal_spec"):
+        spec = parse_pedal_spec(settings["pedal_spec"])
+        levels = spec.levels() if spec else None
+        if levels:
+            cmd += ["--pedals", ",".join(str(p) for p in levels)]
     return cmd
 
 
@@ -105,6 +114,17 @@ def validate_calibration_settings(settings):
             problems.append(
                 f"grip {grip!r} draws continuously, so there is no finite set of "
                 f"levels to calibrate. Use a list (e.g. \"0.5,0.75,1.0\") instead.")
+    if settings.get("pedal_random") and settings.get("pedal_spec"):
+        try:
+            pedal = parse_pedal_spec(settings["pedal_spec"])
+        except ValueError:
+            return problems          # already reported by validate_settings
+        if pedal and pedal.needs_continuous_calibration:
+            problems.append(
+                f"pedal {settings['pedal_spec']!r} draws continuously, which is "
+                f"{len(pedal.levels())} levels at 2 decimals -- roughly "
+                f"{len(pedal.levels()) * 7 // 60} hours of calibration. Use a list "
+                f'(e.g. "0.5,0.75,1.0") instead.')
     return problems
 
 
