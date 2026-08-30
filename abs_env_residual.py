@@ -35,7 +35,7 @@ import abs_env
 import abs_env_incar
 from abs_env_incar import ABSLearningEnvIncar, MAX_EPISODE_STEPS
 from residual_core import residual_to_brakes
-from residual_log import get_logger, StepRingBuffer, YawTrace
+from residual_log import get_logger, StepRingBuffer, YawTrace, CornerDiag
 from sim_config import SimConfig, resolved_userpath
 from calibration import config_key
 from corner import HeadingTracker, arc_radians, heading_branch_is_safe
@@ -317,6 +317,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         self.action_space = gym.spaces.Box(0.0, 1.0, shape=(2,), dtype=np.float32)
         self._ring = StepRingBuffer(STEP_RING_CAPACITY)
         self._yaw_trace = YawTrace()
+        self._corner_diag = CornerDiag()
         self._ep_rel_sum = np.zeros(2)
         self._ep_rel_max = np.zeros(2)
         self._ep_t0 = 0.0
@@ -386,6 +387,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         self.grip = self._draw_grip()
         self._ring.clear()
         self._yaw_trace.clear()
+        self._corner_diag.clear()
         self._ep_rel_sum[:] = 0.0
         self._ep_rel_max[:] = 0.0
         t0 = time.monotonic()
@@ -531,6 +533,9 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # trace decomposes the same number the reward gated on, not a lookalike.
         yaw_error = float(obs[6]) - self.target_yaw_rate
         self._yaw_trace.push(yaw_error, self._dt)
+        # obs[5] is lateral_g -- how much of the tires' grip the corner itself is
+        # using, which decides whether there is any left to brake with.
+        self._corner_diag.push(yaw_error, obs[5], self._last_gps_speed, self._dt)
         if self._entry_yaw_actual is None:
             self._entry_yaw_actual = float(obs[6])
 
@@ -572,6 +577,21 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
                      "target=%.3f (%.0f%% established)", self.episode_count,
                      self._yaw_trace.summary(), entry, self._entry_yaw_target,
                      frac * 100.0)
+            # Where the car ENDED UP pointing versus where the arc says it
+            # should. The reward only grades the yaw RATE error integrated over
+            # time, which a car that lags and then over-rotates can pass while
+            # finishing at the wrong heading -- the two errors cancel in the
+            # integral but not on the road. Diagnostic only; nothing scores it.
+            import math as _math
+            h = self._heading
+            log.info("episode %d heading: swept=%.1fdeg intended=%.1fdeg "
+                     "final_err=%+.1fdeg (%.4frad) | yaw_int=%.4f",
+                     self.episode_count,
+                     _math.degrees(h.current - h.start_heading),
+                     _math.degrees(h.target - h.start_heading),
+                     _math.degrees(h.error), h.error, self.ep_yaw_abs_sum)
+            log.info("episode %d corner diag: %s", self.episode_count,
+                     self._corner_diag.summary())
 
     def _dump_ring(self, why):
         rows = self._ring.dump()

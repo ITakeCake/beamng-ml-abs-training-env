@@ -177,3 +177,67 @@ class YawTrace:
 
     def clear(self):
         self.__init__(self.bucket_s, self.head_s)
+
+
+class CornerDiag:
+    """Per-episode corner diagnostics that the yaw integral cannot express.
+
+    The integral answers "how much total rate error", which turned out to be
+    the wrong question three times over: it cannot say whether the error was
+    signed one way (the car simply not turning enough) or churning both ways
+    (the brakes upsetting it), it keeps grading after the car has effectively
+    stopped, and it hides the lateral grip state that decides whether a corner
+    is even being driven. Each field below answers one of those directly."""
+
+    STOPPED_MS = 1.0          # below this, the "stop" is over in any real sense
+
+    def __init__(self, stopped_ms=STOPPED_MS):
+        self.stopped_ms = float(stopped_ms)
+        self.signed_sum = 0.0       # integral of SIGNED error: bias vs churn
+        self.abs_sum = 0.0          # integral of |error|, for the ratio
+        self.reversals = 0          # sign flips of the error: modulation churn
+        self.after_stop = 0.0       # |error| integral accumulated below stopped_ms
+        self.after_stop_s = 0.0
+        self.peak_lat_g = 0.0
+        self.lat_g_at_peak_err = 0.0
+        self.peak_err = 0.0
+        self._last_sign = 0
+
+    def push(self, yaw_error, lateral_g, speed_ms, dt):
+        e, dt = float(yaw_error), float(dt)
+        self.signed_sum += e * dt
+        self.abs_sum += abs(e) * dt
+        sign = (e > 0) - (e < 0)
+        if sign and self._last_sign and sign != self._last_sign:
+            self.reversals += 1
+        if sign:
+            self._last_sign = sign
+        if float(speed_ms) < self.stopped_ms:
+            self.after_stop += abs(e) * dt
+            self.after_stop_s += dt
+        lat = abs(float(lateral_g))
+        self.peak_lat_g = max(self.peak_lat_g, lat)
+        if abs(e) > self.peak_err:
+            self.peak_err, self.lat_g_at_peak_err = abs(e), lat
+
+    @property
+    def bias_ratio(self):
+        """|signed| / absolute. Near 1.0 = the error is one-directional, the car
+        is consistently not turning enough (a TRACKING failure). Near 0 = it is
+        churning either side of the target (a DISTURBANCE), which is what brake
+        modulation looks like. The integral alone cannot tell these apart."""
+        return 0.0 if self.abs_sum <= 0 else abs(self.signed_sum) / self.abs_sum
+
+    @property
+    def after_stop_fraction(self):
+        return 0.0 if self.abs_sum <= 0 else self.after_stop / self.abs_sum
+
+    def summary(self):
+        return (f"bias={self.bias_ratio:.2f} (signed={self.signed_sum:+.4f} "
+                f"abs={self.abs_sum:.4f}) reversals={self.reversals} "
+                f"after_stop={self.after_stop:.4f} ({self.after_stop_fraction * 100:.0f}%, "
+                f"{self.after_stop_s:.2f}s) peak_lat_g={self.peak_lat_g:.2f} "
+                f"lat_g@peak_err={self.lat_g_at_peak_err:.2f}")
+
+    def clear(self):
+        self.__init__(self.stopped_ms)

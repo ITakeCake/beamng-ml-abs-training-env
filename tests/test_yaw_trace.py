@@ -129,3 +129,56 @@ def test_the_live_corner_total_is_reproduced():
     for _ in range(1080):
         trace.push(0.0170, DT)
     assert trace.total == pytest.approx(0.092, abs=0.002)
+
+
+# ------------------------------------------------------------ CornerDiag
+from residual_log import CornerDiag
+
+
+def test_bias_ratio_separates_a_car_that_understeers_from_one_being_shaken():
+    """The integral gives both of these the same score; the diagnosis differs."""
+    tracking, disturbed = CornerDiag(), CornerDiag()
+    for i in range(1000):
+        tracking.push(-0.02, 0.4, 20.0, DT)            # always short of target
+        disturbed.push(0.02 if i % 2 else -0.02, 0.4, 20.0, DT)   # churning
+    assert tracking.abs_sum == pytest.approx(disturbed.abs_sum)
+    assert tracking.bias_ratio == pytest.approx(1.0)
+    assert disturbed.bias_ratio < 0.05
+    assert disturbed.reversals > 900 and tracking.reversals == 0
+
+
+def test_error_accumulated_after_the_car_has_stopped_is_measured():
+    """target = v/R goes to zero at walking pace, so any residual rotation is
+    graded against a demand of zero -- and it decided which corner episodes
+    crossed the threshold (34% of the integral in the worst one)."""
+    d = CornerDiag()
+    for _ in range(800):
+        d.push(0.02, 0.4, 20.0, DT)      # moving
+    for _ in range(200):
+        d.push(0.02, 0.0, 0.3, DT)       # effectively stopped
+    assert d.after_stop_fraction == pytest.approx(0.2, abs=0.01)
+    assert d.after_stop_s == pytest.approx(1.0, abs=DT)
+
+
+def test_lateral_load_at_the_worst_error_is_captured():
+    d = CornerDiag()
+    d.push(0.01, 0.30, 20.0, DT)
+    d.push(0.09, 0.55, 15.0, DT)         # worst error, high lateral load
+    d.push(0.01, 0.20, 5.0, DT)
+    assert d.peak_lat_g == pytest.approx(0.55)
+    assert d.lat_g_at_peak_err == pytest.approx(0.55)
+
+
+def test_a_clean_episode_reports_no_bias_and_no_after_stop_error():
+    d = CornerDiag()
+    for _ in range(500):
+        d.push(0.0, 0.4, 20.0, DT)
+    assert d.bias_ratio == 0.0 and d.after_stop_fraction == 0.0
+
+
+def test_clear_resets_between_episodes():
+    d = CornerDiag()
+    for _ in range(100):
+        d.push(0.05, 0.4, 0.2, DT)
+    d.clear()
+    assert d.abs_sum == 0.0 and d.reversals == 0 and d.after_stop == 0.0

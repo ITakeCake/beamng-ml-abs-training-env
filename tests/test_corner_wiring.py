@@ -284,3 +284,51 @@ def test_a_straight_line_run_never_hits_the_wrap_guard():
     still start, exactly as it does today."""
     env = StubEnv(None, start_heading=math.pi - 0.01)
     env._start_corner_tracking()                    # must not raise
+
+
+# --------------------------------------------- final heading vs intended
+def test_lag_then_overrotate_passes_the_integral_but_ends_off_heading():
+    """Why final heading is worth logging separately: the reward integrates
+    |yaw rate error|, and a car that lags the arc then over-rotates by the same
+    amount finishes pointing the wrong way while the integral stays small
+    relative to the error it actually ended with."""
+    env = StubEnv(CornerSpec(150.0, LEFT, 0.05))
+    env._start_corner_tracking()
+    h = env._heading
+    heading, speed = 0.0, 26.8
+    integral = 0.0
+    for i in range(1000):
+        env._corner_speed = speed
+        env._advance_corner_target()
+        # A symmetric ABSOLUTE offset, not a ratio: the target falls with speed,
+        # so a ratio lag early and a ratio surplus late do not cancel.
+        rate = env.target_yaw_rate + (-0.05 if i < 500 else 0.05)
+        integral += abs(rate - env.target_yaw_rate) * env._dt
+        heading += rate * env._dt
+        speed = max(0.0, speed - 4.9 * env._dt)
+        env.current_heading = heading
+        h.observe(heading)
+
+    # The two halves cancel in the SWEPT angle...
+    assert h.current - h.start_heading == pytest.approx(h.target - h.start_heading,
+                                                        abs=0.02)
+    # ...so the final heading error is tiny, while the integral is large.
+    assert abs(h.error) < 0.02
+    assert integral > 0.2
+    # i.e. the integral and the final heading answer different questions, and
+    # neither one implies the other.
+
+
+def test_a_car_that_simply_never_turns_ends_far_off_the_intended_heading():
+    env = StubEnv(CornerSpec(150.0, LEFT, 0.05))
+    env._start_corner_tracking()
+    h = env._heading
+    speed = 26.8
+    for _ in range(1000):
+        env._corner_speed = speed
+        env._advance_corner_target()
+        speed = max(0.0, speed - 4.9 * env._dt)
+        h.observe(0.0)                       # car points straight the whole way
+    assert h.current - h.start_heading == pytest.approx(0.0, abs=1e-9)
+    assert (h.target - h.start_heading) > 0.4    # the arc asked for ~0.5 rad
+    assert h.error < -0.4                        # and the car is that far off
