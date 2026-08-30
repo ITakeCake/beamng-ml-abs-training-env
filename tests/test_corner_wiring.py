@@ -92,6 +92,16 @@ def test_restores_queue_lua_command_even_if_reset_raises():
     assert veh.queue_lua_command == original
 
 
+class FakeTable:
+    def __init__(self, steering):
+        self.steering = steering
+
+    def steering_for(self, key):
+        if key not in self.steering:
+            raise KeyError(f"no steering angle for {key!r}")
+        return self.steering[key]["steering"]
+
+
 # ------------------------------------------------ per-step target wiring
 class StubEnv(abs_env_residual.ABSLearningEnvResidual):
     """Exercises _start_corner_tracking / _advance_corner_target without a
@@ -200,6 +210,21 @@ def test_the_arc_sweep_matches_the_geometry_the_guard_was_given():
     assert env._heading.arc_rad == pytest.approx(arc_radians(26.8, 50.0, 9.0), rel=0.02)
 
 
+def test_tracking_starts_when_the_angle_lives_only_in_the_calibration_table():
+    """The normal case: CornerSpec carries no angle, the table does. A path
+    that reaches for spec.signed_steering here raises and kills the episode
+    before a single step runs (observed live)."""
+    from calibration import config_key
+    env = StubEnv(CornerSpec(150.0, LEFT))
+    key = config_key(grip=1.0, speed_mph=60, radius_m=150.0)
+    env._calibration = FakeTable({key: {"steering": 0.0504}})
+    env.grip, env.target_mph = 1.0, 60
+    env._start_corner_tracking()                    # must not raise
+    assert env.target_yaw_rate == 0.0               # not advanced yet
+    env._advance_corner_target()
+    assert env.target_yaw_rate == pytest.approx(26.8 / 150.0)
+
+
 def test_a_corner_that_would_cross_the_wrap_is_refused_at_reset():
     env = StubEnv(CornerSpec(50.0, LEFT, 0.25), start_heading=math.pi - 0.05)
     with pytest.raises(RuntimeError, match="CRASH that never happened"):
@@ -207,16 +232,6 @@ def test_a_corner_that_would_cross_the_wrap_is_refused_at_reset():
 
 
 # ------------------------------------------- per-episode steering lookup
-class FakeTable:
-    def __init__(self, steering):
-        self.steering = steering
-
-    def steering_for(self, key):
-        if key not in self.steering:
-            raise KeyError(f"no steering angle for {key!r}")
-        return self.steering[key]["steering"]
-
-
 def test_steering_comes_from_the_row_that_will_also_score_the_episode():
     from calibration import config_key
     key = config_key(grip=0.5, speed_mph=60, radius_m=50.0)

@@ -475,10 +475,13 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
                 "heading channel. The parent subtracts raw headings, so one step "
                 "mid-corner would read a ~2pi deviation and terminate the episode "
                 "as a CRASH that never happened. Spawn the car facing nearer 0.")
+        # _corner_steering(), NOT the spec's own signed_steering: the angle
+        # usually lives in the calibration table, and the spec property raises
+        # when the spec itself has none.
         log.info("corner: R=%.1fm dir=%s steering=%+.3f arc=%.2frad "
                  "entry_yaw_target=%.3frad/s", self._corner.radius_m,
                  "L" if self._corner.direction > 0 else "R",
-                 self._corner.signed_steering, arc,
+                 self._corner_steering(), arc,
                  self._corner.yaw_target(self.start_speed_ms))
 
     def _advance_corner_target(self):
