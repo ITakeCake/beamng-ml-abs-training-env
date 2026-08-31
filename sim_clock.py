@@ -145,3 +145,41 @@ def wrap(bng, deterministic=True, speed_factor=1.0):
     if deterministic:
         return bng
     return FreeRunClock(bng, speed_factor=speed_factor)
+
+
+# ---------------------------------------------------------------------------
+# The frame limiter, which is the whole ballgame.
+# ---------------------------------------------------------------------------
+# BeamNG services beamngpy requests from onPreRender (techCore.lua:521), so
+# every call waits for the next frame and step(N) costs N frames. With the
+# limiter on, frames arrive at ~64 Hz and a single step(1) measured 31.14 ms --
+# 1/14th of real time, and the reason training crawled.
+#
+# Measured on 0.37.6.0, same session, read back to confirm it applied:
+#
+#     limiter as found (true|false|200)   step(1) p50 = 31.14 ms   32 Hz
+#     limiter off      (false|false|2000) step(1) p50 =  0.69 ms 1450 Hz
+#
+# 45x. It MUST be set at runtime through settings.setValue: editing
+# settings.json while the game is closed was measured to change nothing, so the
+# running process does not take the file's word for it.
+#
+# fpsLimitBackgroundEnabled matters as much as the main flag -- a headless
+# instance has no focused window, so it is a background window by any usual
+# test, and that limiter defaults to 5 FPS.
+FPS_UNCAP_LUA = (
+    "settings.setValue('fpsLimitEnabled', false); "
+    "settings.setValue('fpsLimitBackgroundEnabled', false); "
+    "settings.setValue('fpsLimit', 2000)"
+)
+
+
+def uncap_frame_rate(bng):
+    """Remove BeamNG's frame limiter for this session. Returns the lua sent.
+
+    Queued on the GameEngine VM, which is where `settings` lives. Safe to call
+    more than once; harmless on a windowed instance, where it just means the
+    renderer is no longer capped.
+    """
+    bng.control.queue_lua_command(FPS_UNCAP_LUA)
+    return FPS_UNCAP_LUA

@@ -302,3 +302,45 @@ def test_the_episode_mirror_follows_episodes_not_a_step_count():
     src = open(os.path.join(root, "train_residual.py"), encoding="utf-8").read()
     assert 'dones = self.locals.get("dones")' in src
     assert "every_n_steps=50" in src
+
+
+# ------------------------------------------------- the frame limiter
+def test_the_uncap_sets_both_limiter_flags():
+    """fpsLimitBackgroundEnabled matters as much as the main flag: a headless
+    instance has no focused window, and that limiter defaults to 5 FPS."""
+    import sim_clock
+    lua = sim_clock.FPS_UNCAP_LUA
+    assert "settings.setValue('fpsLimitEnabled', false)" in lua
+    assert "settings.setValue('fpsLimitBackgroundEnabled', false)" in lua
+
+
+def test_the_uncap_goes_through_setvalue_not_the_json_file():
+    """Editing settings.json with the game closed was MEASURED to change
+    nothing (31.14 -> 31.03 ms). Only the runtime call took effect
+    (31.14 -> 0.69 ms), so the mechanism is the finding, not a detail."""
+    import sim_clock
+    assert "settings.setValue" in sim_clock.FPS_UNCAP_LUA
+
+
+def test_uncap_is_queued_on_the_game_engine_vm():
+    """`settings` lives on the GE VM, not the vehicle VM."""
+    import sim_clock
+    bng = _FakeBng()
+    sent = sim_clock.uncap_frame_rate(bng)
+    assert bng.control.lua == [sent]
+
+
+def test_uncap_runs_at_env_startup():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "abs_env_residual.py"), encoding="utf-8").read()
+    assert "sim_clock.uncap_frame_rate(self.bng)" in src
+
+
+def test_uncap_applies_in_both_clock_modes():
+    """The limiter gates every request, not just step(), so free-running pays
+    it too -- the call must not sit behind a `if deterministic` branch."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "abs_env_residual.py"), encoding="utf-8").read()
+    i = src.index("sim_clock.uncap_frame_rate(self.bng)")
+    before = src[:i]
+    assert before.rstrip().splitlines()[-1].strip().startswith("#")

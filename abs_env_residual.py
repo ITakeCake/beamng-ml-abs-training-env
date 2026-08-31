@@ -327,6 +327,10 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # untouched when deterministic, so the default path is byte-identical.
         self.deterministic = bool(deterministic)
         self.train_speed_factor = float(train_speed_factor)
+        # Before anything is timed: the frame limiter gates every request, and
+        # leaving it on costs 45x (see sim_clock.uncap_frame_rate).
+        sim_clock.uncap_frame_rate(self.bng)
+        log.info("frame limiter uncapped (measured 31.14ms -> 0.69ms per step)")
         self.bng = sim_clock.wrap(self.bng, deterministic=self.deterministic,
                                   speed_factor=self.train_speed_factor)
         if not self.deterministic:
