@@ -203,6 +203,38 @@ def wrap(bng, deterministic=True, speed_factor=1.0):
     return FreeRunClock(bng, speed_factor=speed_factor)
 
 
+UNCAP_OK_MS = 5.0
+
+
+def uncap_and_verify(bng, log=None):
+    """Uncap with an acknowledged call, then measure what a step now costs.
+
+    Two independent checks, because they can disagree and the disagreement is
+    informative: the engine's own report of the settings, and the wall-clock
+    cost of a step. The settings say what was applied; the timing says whether
+    it mattered.
+    """
+    try:
+        state = uncap_frame_rate(bng, verify=True)
+    except Exception as e:
+        if log:
+            log.warning("frame limiter: uncap call failed (%s: %s)",
+                        type(e).__name__, e)
+        return None
+    try:
+        ms = measure_step_ms(bng)
+    except Exception as e:
+        if log:
+            log.warning("frame limiter: settings=%s but could not time a step "
+                        "(%s: %s)", state, type(e).__name__, e)
+        return None
+    if log:
+        log.info("frame limiter: engine reports %s | step(1) = %.2f ms (%s)",
+                 state, ms,
+                 "uncapped" if ms < UNCAP_OK_MS else "STILL CAPPED")
+    return ms
+
+
 def measure_step_ms(bng, reps=15):
     """Median wall-clock ms of step(1). The honest check that the uncap worked.
 
@@ -250,12 +282,24 @@ FPS_UNCAP_LUA = (
 )
 
 
-def uncap_frame_rate(bng):
-    """Remove BeamNG's frame limiter for this session. Returns the lua sent.
+def uncap_frame_rate(bng, verify=True):
+    """Remove BeamNG's frame limiter and return what the engine says it now is.
 
-    Queued on the GameEngine VM, which is where `settings` lives. Safe to call
-    more than once; harmless on a windowed instance, where it just means the
-    renderer is no longer capped.
+    Uses queue_lua_command(response=True), which blocks for the engine's reply,
+    rather than the fire-and-forget form. That distinction is not cosmetic: the
+    async form created a real race -- the env measured step(1) at 13.35 ms and
+    logged STILL CAPPED while the command had only been queued, and the same
+    run then reached 259 steps/s. An acknowledged call cannot report on a
+    setting that has not been applied yet.
+
+    Returns the engine's own "enabled|backgroundEnabled|limit" string, so a
+    caller logs what is true rather than what was asked for.
     """
-    bng.control.queue_lua_command(FPS_UNCAP_LUA)
-    return FPS_UNCAP_LUA
+    if not verify:
+        bng.control.queue_lua_command(FPS_UNCAP_LUA)
+        return None
+    chunk = FPS_UNCAP_LUA + (
+        "; return tostring(settings.getValue('fpsLimitEnabled'))"
+        "..'|'..tostring(settings.getValue('fpsLimitBackgroundEnabled'))"
+        "..'|'..tostring(settings.getValue('fpsLimit'))")
+    return bng.control.queue_lua_command(chunk, response=True)

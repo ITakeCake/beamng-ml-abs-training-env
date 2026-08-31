@@ -335,17 +335,14 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # it was meant to fix).
         self.bng = sim_clock.wrap(self.bng, deterministic=self.deterministic,
                                   speed_factor=self.train_speed_factor)
-        sim_clock.uncap_frame_rate(self.bng)
         # Measure rather than read the setting back: the read-back log line
         # never surfaced in the instance's own log, and the per-step cost is
-        # the thing that actually matters. ~31 ms = limiter still in charge.
+        # the thing that actually matters. ~31 ms = limiter still in charge,
+        # ~0.7 ms = gone.
         try:
-            ms = sim_clock.measure_step_ms(self.bng)
-            log.info("frame limiter: step(1) = %.2f ms (%s)", ms,
-                     "UNCAPPED, good" if ms < 5.0 else
-                     "STILL CAPPED -- expect ~14x slower training")
+            sim_clock.uncap_and_verify(self.bng, log)
         except Exception as e:
-            log.warning("could not measure step timing: %s: %s",
+            log.warning("could not verify frame limiter: %s: %s",
                         type(e).__name__, e)
         if not self.deterministic:
             log.warning(

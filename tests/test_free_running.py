@@ -49,8 +49,11 @@ class _FakeControl:
         self.paused = 0
         self.resumed = 0
 
-    def queue_lua_command(self, cmd):
+    def queue_lua_command(self, cmd, response=False):
+        # Mirrors beamngpy's real signature: response=True blocks for the
+        # engine's reply and returns it.
         self.lua.append(cmd)
+        return "false|false|2000" if response else None
 
     def pause(self):
         self.paused += 1
@@ -103,10 +106,10 @@ def test_deterministic_reapplies_the_uncap_on_every_mode_change():
     guard = sim_clock.wrap(bng, deterministic=True)
     guard.settings.set_deterministic(200)
     assert bng.settings.determ_hz == 200                 # still forwarded
-    assert sim_clock.FPS_UNCAP_LUA in bng.control.lua    # and re-applied
+    assert any(c.startswith(sim_clock.FPS_UNCAP_LUA) for c in bng.control.lua)    # and re-applied
     bng.control.lua.clear()
     guard.settings.set_nondeterministic()
-    assert sim_clock.FPS_UNCAP_LUA in bng.control.lua
+    assert any(c.startswith(sim_clock.FPS_UNCAP_LUA) for c in bng.control.lua)
 
 
 def test_free_running_also_reapplies_the_uncap():
@@ -116,7 +119,36 @@ def test_free_running_also_reapplies_the_uncap():
     bng = _FakeBng()
     clock = sim_clock.wrap(bng, deterministic=False, speed_factor=10)
     clock.settings.set_deterministic(200)
-    assert sim_clock.FPS_UNCAP_LUA in bng.control.lua
+    assert any(c.startswith(sim_clock.FPS_UNCAP_LUA) for c in bng.control.lua)
+
+
+def test_the_uncap_uses_an_acknowledged_call_not_a_sleep():
+    """queue_lua_command(response=True) blocks for the engine's reply. The
+    fire-and-forget form created a real race: the env measured 13.35 ms and
+    logged STILL CAPPED while the command was merely queued, and the run then
+    hit 259 steps/s. An acknowledged call cannot report on an unapplied
+    setting."""
+    import inspect
+    import sim_clock
+    src = inspect.getsource(sim_clock.uncap_frame_rate)
+    assert "response=True" in src
+    assert "sleep" not in src
+
+
+def test_the_uncap_returns_what_the_engine_reports():
+    """Not what was requested -- what the engine says is true afterwards."""
+    import sim_clock
+
+    class _Ack(_FakeBng):
+        def __init__(self):
+            super().__init__()
+            self.control.queue_lua_command = self._q
+
+        def _q(self, chunk, response=False):
+            self.control.lua.append(chunk)
+            return "false|false|2000" if response else None
+
+    assert sim_clock.uncap_frame_rate(_Ack()) == "false|false|2000"
 
 
 def test_the_step_check_reports_milliseconds():
@@ -363,14 +395,15 @@ def test_uncap_is_queued_on_the_game_engine_vm():
     """`settings` lives on the GE VM, not the vehicle VM."""
     import sim_clock
     bng = _FakeBng()
-    sent = sim_clock.uncap_frame_rate(bng)
-    assert bng.control.lua == [sent]
+    sim_clock.uncap_frame_rate(bng)
+    assert len(bng.control.lua) == 1
+    assert bng.control.lua[0].startswith(sim_clock.FPS_UNCAP_LUA)
 
 
 def test_uncap_runs_at_env_startup():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     src = open(os.path.join(root, "abs_env_residual.py"), encoding="utf-8").read()
-    assert "sim_clock.uncap_frame_rate(self.bng)" in src
+    assert "sim_clock.uncap_and_verify(self.bng, log)" in src
 
 
 def test_uncap_applies_in_both_clock_modes():
@@ -382,7 +415,7 @@ def test_uncap_applies_in_both_clock_modes():
         bng = _FakeBng()
         h = sim_clock.wrap(bng, deterministic=det, speed_factor=4)
         h.settings.set_deterministic(200)
-        assert sim_clock.FPS_UNCAP_LUA in bng.control.lua, f"deterministic={det}"
+        assert any(c.startswith(sim_clock.FPS_UNCAP_LUA) for c in bng.control.lua), f"deterministic={det}"
 
 
 def test_the_env_verifies_the_uncap_instead_of_assuming_it():
@@ -390,5 +423,6 @@ def test_the_env_verifies_the_uncap_instead_of_assuming_it():
     line claiming success is not evidence of success."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     src = open(os.path.join(root, "abs_env_residual.py"), encoding="utf-8").read()
-    assert "sim_clock.measure_step_ms(self.bng)" in src
-    assert "STILL CAPPED" in src
+    assert "sim_clock.uncap_and_verify(self.bng, log)" in src
+    import sim_clock
+    assert sim_clock.UNCAP_OK_MS > 0
