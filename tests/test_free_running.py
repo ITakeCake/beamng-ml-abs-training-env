@@ -82,12 +82,49 @@ class _FakeBng:
         self.stepped.append(n)
 
 
-def test_deterministic_returns_the_handle_untouched():
-    """The default path must be byte-identical to every run before this switch
-    existed, so it cannot be a wrapper that merely forwards."""
+def test_deterministic_still_steps_the_real_handle():
+    """The deterministic path keeps its exact timing semantics: step() and
+    control forward untouched. Only `settings` is intercepted, and only so the
+    frame limiter cannot creep back (PPO-11 measured it creeping back)."""
     import sim_clock
     bng = _FakeBng()
-    assert sim_clock.wrap(bng, deterministic=True) is bng
+    guard = sim_clock.wrap(bng, deterministic=True)
+    guard.step(7)
+    assert bng.stepped == [7]
+    assert guard.scenario == "sentinel"
+
+
+def test_deterministic_reapplies_the_uncap_on_every_mode_change():
+    """Uncapping once at startup was measured NOT to survive: PPO-11 ran at
+    17.0 steps/s against the 13.9 it was meant to fix. The env changes mode on
+    every reset (abs_env_incar.py:229), so the uncap has to follow it."""
+    import sim_clock
+    bng = _FakeBng()
+    guard = sim_clock.wrap(bng, deterministic=True)
+    guard.settings.set_deterministic(200)
+    assert bng.settings.determ_hz == 200                 # still forwarded
+    assert sim_clock.FPS_UNCAP_LUA in bng.control.lua    # and re-applied
+    bng.control.lua.clear()
+    guard.settings.set_nondeterministic()
+    assert sim_clock.FPS_UNCAP_LUA in bng.control.lua
+
+
+def test_free_running_also_reapplies_the_uncap():
+    """The limiter gates every request, not just step(), so free-running pays
+    it too."""
+    import sim_clock
+    bng = _FakeBng()
+    clock = sim_clock.wrap(bng, deterministic=False, speed_factor=10)
+    clock.settings.set_deterministic(200)
+    assert sim_clock.FPS_UNCAP_LUA in bng.control.lua
+
+
+def test_the_step_check_reports_milliseconds():
+    """Measuring beats reading the setting back -- the read-back log line never
+    surfaced in the running instance's log."""
+    import sim_clock
+    ms = sim_clock.measure_step_ms(_FakeBng(), reps=5)
+    assert isinstance(ms, float) and ms >= 0.0
 
 
 def test_free_running_never_steps_the_simulation():
@@ -337,10 +374,21 @@ def test_uncap_runs_at_env_startup():
 
 
 def test_uncap_applies_in_both_clock_modes():
-    """The limiter gates every request, not just step(), so free-running pays
-    it too -- the call must not sit behind a `if deterministic` branch."""
+    """The limiter gates every request, not just step(), so free-running pays it
+    too. Checked on the wrapper rather than on the env's source text: both
+    branches of sim_clock.wrap must re-apply it."""
+    import sim_clock
+    for det in (True, False):
+        bng = _FakeBng()
+        h = sim_clock.wrap(bng, deterministic=det, speed_factor=4)
+        h.settings.set_deterministic(200)
+        assert sim_clock.FPS_UNCAP_LUA in bng.control.lua, f"deterministic={det}"
+
+
+def test_the_env_verifies_the_uncap_instead_of_assuming_it():
+    """PPO-11 logged 'frame limiter uncapped' and then ran at 17 steps/s. A log
+    line claiming success is not evidence of success."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     src = open(os.path.join(root, "abs_env_residual.py"), encoding="utf-8").read()
-    i = src.index("sim_clock.uncap_frame_rate(self.bng)")
-    before = src[:i]
-    assert before.rstrip().splitlines()[-1].strip().startswith("#")
+    assert "sim_clock.measure_step_ms(self.bng)" in src
+    assert "STILL CAPPED" in src

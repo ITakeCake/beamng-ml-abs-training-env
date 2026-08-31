@@ -328,11 +328,25 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         self.deterministic = bool(deterministic)
         self.train_speed_factor = float(train_speed_factor)
         # Before anything is timed: the frame limiter gates every request, and
-        # leaving it on costs 45x (see sim_clock.uncap_frame_rate).
-        sim_clock.uncap_frame_rate(self.bng)
-        log.info("frame limiter uncapped (measured 31.14ms -> 0.69ms per step)")
+        # leaving it on costs 45x (see sim_clock.uncap_frame_rate). The wrap
+        # below re-applies it after every set_deterministic/set_nondeterministic,
+        # because uncapping only here was measured NOT to survive the env's
+        # per-reset mode changes (PPO-11: 17.0 steps/s, barely above the 13.9
+        # it was meant to fix).
         self.bng = sim_clock.wrap(self.bng, deterministic=self.deterministic,
                                   speed_factor=self.train_speed_factor)
+        sim_clock.uncap_frame_rate(self.bng)
+        # Measure rather than read the setting back: the read-back log line
+        # never surfaced in the instance's own log, and the per-step cost is
+        # the thing that actually matters. ~31 ms = limiter still in charge.
+        try:
+            ms = sim_clock.measure_step_ms(self.bng)
+            log.info("frame limiter: step(1) = %.2f ms (%s)", ms,
+                     "UNCAPPED, good" if ms < 5.0 else
+                     "STILL CAPPED -- expect ~14x slower training")
+        except Exception as e:
+            log.warning("could not measure step timing: %s: %s",
+                        type(e).__name__, e)
         if not self.deterministic:
             log.warning(
                 "FREE-RUNNING training at %.4gx: the policy decides once per "

@@ -75,6 +75,7 @@ class _SettingsProxy:
 
     def set_deterministic(self, hz=None):
         self._clock.apply_speed_factor()
+        uncap_frame_rate(self._clock._bng)
         return None
 
     def set_nondeterministic(self):
@@ -84,7 +85,9 @@ class _SettingsProxy:
         # past the target speed, so the factor comes off here and goes back on
         # at set_deterministic() when the measured phase begins.
         self._clock.restore_realtime()
-        return self._settings.set_nondeterministic()
+        out = self._settings.set_nondeterministic()
+        uncap_frame_rate(self._clock._bng)
+        return out
 
     def __getattr__(self, name):
         return getattr(self._settings, name)
@@ -140,11 +143,84 @@ class FreeRunClock:
         return getattr(self._bng, name)
 
 
+class _UncapSettings:
+    """`bng.settings`, re-applying the frame uncap after every mode change.
+
+    Uncapping once at startup was not enough and PPO-11 proved it: 17.0 steps/s
+    against PPO-05's 13.9, i.e. essentially nothing, even though the uncap call
+    demonstrably ran. The env calls set_nondeterministic() then
+    set_deterministic() on EVERY reset (abs_env_incar.py:229), and the working
+    measurement in fps_test.py had set_deterministic BEFORE the uncap -- the
+    env's order is the reverse and repeats per episode.
+
+    So the uncap is re-applied after each of these calls rather than trusted to
+    survive them. It costs one queued lua command per episode.
+    """
+
+    def __init__(self, settings, bng):
+        self._settings = settings
+        self._bng = bng
+
+    def set_deterministic(self, *a, **k):
+        out = self._settings.set_deterministic(*a, **k)
+        uncap_frame_rate(self._bng)
+        return out
+
+    def set_nondeterministic(self, *a, **k):
+        out = self._settings.set_nondeterministic(*a, **k)
+        uncap_frame_rate(self._bng)
+        return out
+
+    def set_steps_per_second(self, *a, **k):
+        out = self._settings.set_steps_per_second(*a, **k)
+        uncap_frame_rate(self._bng)
+        return out
+
+    def __getattr__(self, name):
+        return getattr(self._settings, name)
+
+
+class UncapGuard:
+    """The real handle, with only `settings` intercepted.
+
+    step(), control and everything else forward untouched, so the deterministic
+    path keeps its exact timing semantics -- the only added behaviour is that
+    the frame limiter cannot creep back.
+    """
+
+    def __init__(self, bng):
+        self._bng = bng
+        self.settings = _UncapSettings(bng.settings, bng)
+
+    def __getattr__(self, name):
+        return getattr(self._bng, name)
+
+
 def wrap(bng, deterministic=True, speed_factor=1.0):
-    """Return the handle the env should use: the real one, or a free-run proxy."""
+    """Return the handle the env should use: guarded real one, or free-run proxy."""
     if deterministic:
-        return bng
+        return UncapGuard(bng)
     return FreeRunClock(bng, speed_factor=speed_factor)
+
+
+def measure_step_ms(bng, reps=15):
+    """Median wall-clock ms of step(1). The honest check that the uncap worked.
+
+    Reading the setting back proved unreliable (the queued log line never
+    appeared in the instance's log), and the setting is not the point anyway --
+    the per-step cost is. ~31 ms means the limiter is still in charge; ~1 ms or
+    less means it is gone.
+    """
+    import time as _t
+    for _ in range(3):
+        bng.step(1)
+    xs = []
+    for _ in range(reps):
+        t0 = _t.perf_counter()
+        bng.step(1)
+        xs.append((_t.perf_counter() - t0) * 1000.0)
+    xs.sort()
+    return xs[len(xs) // 2]
 
 
 # ---------------------------------------------------------------------------
