@@ -75,7 +75,6 @@ class _SettingsProxy:
 
     def set_deterministic(self, hz=None):
         self._clock.apply_speed_factor()
-        uncap_frame_rate(self._clock._bng)
         return None
 
     def set_nondeterministic(self):
@@ -85,9 +84,7 @@ class _SettingsProxy:
         # past the target speed, so the factor comes off here and goes back on
         # at set_deterministic() when the measured phase begins.
         self._clock.restore_realtime()
-        out = self._settings.set_nondeterministic()
-        uncap_frame_rate(self._clock._bng)
-        return out
+        return self._settings.set_nondeterministic()
 
     def __getattr__(self, name):
         return getattr(self._settings, name)
@@ -143,66 +140,40 @@ class FreeRunClock:
         return getattr(self._bng, name)
 
 
-class _UncapSettings:
-    """`bng.settings`, re-applying the frame uncap after every mode change.
-
-    Uncapping once at startup was not enough and PPO-11 proved it: 17.0 steps/s
-    against PPO-05's 13.9, i.e. essentially nothing, even though the uncap call
-    demonstrably ran. The env calls set_nondeterministic() then
-    set_deterministic() on EVERY reset (abs_env_incar.py:229), and the working
-    measurement in fps_test.py had set_deterministic BEFORE the uncap -- the
-    env's order is the reverse and repeats per episode.
-
-    So the uncap is re-applied after each of these calls rather than trusted to
-    survive them. It costs one queued lua command per episode.
-    """
-
-    def __init__(self, settings, bng):
-        self._settings = settings
-        self._bng = bng
-
-    def set_deterministic(self, *a, **k):
-        out = self._settings.set_deterministic(*a, **k)
-        uncap_frame_rate(self._bng)
-        return out
-
-    def set_nondeterministic(self, *a, **k):
-        out = self._settings.set_nondeterministic(*a, **k)
-        uncap_frame_rate(self._bng)
-        return out
-
-    def set_steps_per_second(self, *a, **k):
-        out = self._settings.set_steps_per_second(*a, **k)
-        uncap_frame_rate(self._bng)
-        return out
-
-    def __getattr__(self, name):
-        return getattr(self._settings, name)
-
-
-class UncapGuard:
-    """The real handle, with only `settings` intercepted.
-
-    step(), control and everything else forward untouched, so the deterministic
-    path keeps its exact timing semantics -- the only added behaviour is that
-    the frame limiter cannot creep back.
-    """
-
-    def __init__(self, bng):
-        self._bng = bng
-        self.settings = _UncapSettings(bng.settings, bng)
-
-    def __getattr__(self, name):
-        return getattr(self._bng, name)
-
-
 def wrap(bng, deterministic=True, speed_factor=1.0):
-    """Return the handle the env should use: guarded real one, or free-run proxy."""
+    """Return the handle the env should use: the real one, or a free-run proxy."""
     if deterministic:
-        return UncapGuard(bng)
+        return bng
     return FreeRunClock(bng, speed_factor=speed_factor)
 
 
+# ---------------------------------------------------------------------------
+# DO NOT UNCAP THE FRAME LIMITER. It is load-bearing.
+# ---------------------------------------------------------------------------
+# It looks like free speed and is not. BeamNG services beamngpy from
+# onPreRender (techCore.lua:521) and step(N) decrements blocking.data once per
+# RENDERED FRAME (line 559) -- not per physics tick. With the limiter on, one
+# frame happens to carry exactly one tick, which is what makes deterministic
+# stepping mean anything. Uncapped, frames outrun physics and step(1) returns on
+# a frame where physics may not have ticked at all.
+#
+# Measured 2026-08-30, stage_probe.py, one episode each, nothing else differing:
+#
+#   limiter ON    702 python steps -> 702 distinct controller ticks   1:1
+#                 stopped at step 701, dist=62.45 m, avg_g=0.9855, 13.1 steps/s
+#                 VERDICT PASS
+#
+#   limiter OFF  1500 python steps ->  91 distinct controller ticks   16.5:1
+#                 never stopped, dist=0.0, avg_g=0.0, "150 steps/s"
+#                 VERDICT FAIL
+#
+# The apparent 45x (step(1) 31.14ms -> 0.69ms) was step() returning without
+# doing the work, and PPO-12's 259 steps/s was the same illusion -- which is
+# exactly why every one of its episodes timed out with dist=0.0.
+#
+# Keep this function so the experiment is reproducible and nobody re-derives it
+# from scratch, but nothing calls it. If you are tempted, run
+# `python stage_probe.py --uncap on` and read the tick count first.
 UNCAP_OK_MS = 5.0
 
 

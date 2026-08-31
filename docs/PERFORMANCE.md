@@ -1,49 +1,58 @@
-# Why training was slow, and what actually fixed it
+# The frame limiter: a 45x speedup that was not real
 
 Measured 2026-08-30 on BeamNG.tech 0.37.6.0 / beamngpy 1.34.1, i5-12600K.
 
-## The finding, in one line
+## RETRACTED
 
-**BeamNG's frame limiter gated every beamngpy request. Removing it made a
-simulation step 45x faster.**
+An earlier version of this file reported that removing BeamNG's frame limiter
+made stepping 45x faster. **It does not. It makes `step()` return without
+advancing physics.** The corrected finding is below; the timing measurements
+that led to the wrong conclusion are kept because they are accurate, and
+because the trap is easy to fall into twice.
+
+## The corrected finding
+
+`step(N)` decrements `blocking.data` once per **rendered frame**
+(`techCore.lua:559`), not per physics tick. With the limiter on, one frame
+carries exactly one tick -- which is what makes deterministic stepping mean
+anything at all. Uncapped, frames outrun physics and a step returns on a frame
+where physics may not have ticked.
+
+One episode each, `stage_probe.py`, nothing else differing:
 
 ```
-limiter as found (fpsLimitEnabled=true,  background=false, cap=200)
-    bng.control.step(1)   p50 = 31.14 ms   ->    32 Hz
+limiter ON  (control)    702 python steps -> 702 distinct controller ticks  1:1
+                         stopped at step 701, dist=62.45 m, avg_g=0.9855
+                         13.1 steps/s                                  PASS
 
-limiter off      (fpsLimitEnabled=false, background=false, cap=2000)
-    bng.control.step(1)   p50 =  0.69 ms   ->  1450 Hz
+limiter OFF             1500 python steps ->  91 distinct controller ticks  16.5:1
+                         never stopped, dist=0.0 m, avg_g=0.0
+                         "150 steps/s"                                 FAIL
 ```
 
-Both measured in one session, values read back from the engine to confirm they
-applied. Applied automatically now: `sim_clock.uncap_frame_rate()`, called at
-env startup in `abs_env_residual.__init__`.
+The apparent speedup was step() skipping the work. PPO-12's 259 steps/s was the
+same illusion, which is exactly why every one of its episodes ended TIMEOUT with
+`dist=0.0` while `peak_g` read 1.4-1.6: the car really was braking, and the
+simulation was barely advancing.
 
-## Two traps that cost most of the day
+**The frame limiter is load-bearing. Do not remove it.** `sim_clock.py` keeps
+`uncap_frame_rate()` for reproducing the experiment, and a test asserts the
+training path never calls it.
 
-### 1. Editing settings.json does nothing
+## How the wrong conclusion survived three checks
 
-Changing `fpsLimitEnabled` in
-`%LOCALAPPDATA%\BeamNG\BeamNG.tech\current\settings\settings.json` while the
-game was closed, then launching, measured **31.14 -> 31.03 ms**: no change at
-all. The running process does not take the file's word for it.
+Worth recording, because each check looked like confirmation:
 
-**Only `settings.setValue(...)` at runtime works**, queued on the GameEngine VM:
+1. `step(1)` really did drop 31.14 ms -> 0.69 ms. True, and meaningless: it was
+   timing a call that no longer did anything.
+2. Editing `settings.json` offline changed nothing (31.14 -> 31.03 ms), which
+   looked like "the fix did not apply" rather than "the fix is wrong".
+3. PPO-12 hit 259 steps/s. Throughput went up exactly as predicted -- while
+   every episode scored zero.
 
-```lua
-settings.setValue('fpsLimitEnabled', false)
-settings.setValue('fpsLimitBackgroundEnabled', false)
-settings.setValue('fpsLimit', 2000)
-```
-
-Read the values back before believing a negative result -- that is what
-distinguished the working fix from the broken one.
-
-### 2. fpsLimitBackgroundEnabled matters as much as the main flag
-
-A headless instance has no focused window, so it is a background window by any
-usual test, and `fpsLimitBackground` defaults to **5 FPS**. Setting only
-`fpsLimitEnabled` can leave the background limiter in charge.
+What finally settled it was counting **distinct `mlabs_tickseq` values per
+python step**. Throughput cannot distinguish real work from skipped work; the
+tick correspondence can. Prefer that check to any timing number.
 
 ## The mechanism (still true, and worth knowing)
 
@@ -93,28 +102,34 @@ PPO-05  deterministic   13.9 steps/s   ~1084 steps/episode   ~80 s/episode
 PPO-10  free-running    22.5 steps/s     ~50 steps/episode   ~2.2 s/episode
 ```
 
-## What this retired
+## What still stands after the retraction
 
-Before finding the limiter, the conclusion was that 64 Hz was a hard floor,
-that 80 steps/s was unreachable over the socket, and that an in-Lua rollout
-(policy runs in vlua, episode shipped to Python in one transfer) was the only
-way past it. **None of that holds.** The ceiling was a setting.
+The earlier conclusion was that ~64 Hz is a hard floor, that 80 steps/s is
+unreachable over the socket, and that the only way past it is to stop crossing
+the socket per decision. **That conclusion survives.** The limiter looked like a
+way around it and was not; it was a way to skip the work instead.
 
-The in-Lua rollout may still be worth building one day for the sim-to-deploy
-argument -- training and deployment become literally the same loop -- but it is
-no longer a performance necessity.
+So the real options are unchanged:
+
+1. **Deterministic, limiter on** -- 13.1 steps/s measured, 1:1 tick fidelity,
+   full 200 Hz decisions, reproducible. Correct, and slow.
+2. **Free-running** -- 22.5 steps/s, no `step()` at all so no frame gate, but
+   the policy decides once per round trip (~49 decisions per stop instead of
+   ~1200). Correct, faster, coarser.
+3. **In-Lua rollout** -- the policy runs in vlua at 200 Hz and the episode ships
+   to Python in one transfer. Still the only design that gets full decision rate
+   AND speed, and now again the only route past the frame gate.
 
 ## Open question
 
-The 45x is on an isolated `step(1)`. Real training also does torch inference,
-obs assembly, reward and VecNormalize, none of which got faster. If the ~62 ms
-of sim calls per PPO-05 step collapses to ~1.4 ms, the remaining ~10 ms of
-Python work becomes the floor, which would land near 100 steps/s -- arithmetic,
-not a measurement. **Run ~20k deterministic steps and read steps/s off the
-monitor to find the real new ceiling.**
+Nothing measured today improved throughput. Deterministic is 13.1 steps/s and
+free-running is 22.5 steps/s, both as they were before any of this.
 
-If deterministic now beats free-running, free-running is obsolete: deterministic
-gives full 200 Hz decisions (~1200 per stop instead of ~49) and reproducibility.
+Before building anything large, confirm free-running has the tick fidelity that
+uncapping turned out to lack: run `stage_probe.py` against a free-running env
+and check that distinct controller ticks track the sim time actually consumed.
+Free-running never calls `step()`, so it should not have this failure mode --
+but that is reasoning, not a measurement, and reasoning is what went wrong here.
 
 ## Tools
 
@@ -122,4 +137,9 @@ gives full 200 Hz decisions (~1200 per stop instead of ~49) and reproducibility.
   running instance if one is listening, else launches its own. Two instances
   cannot share a userpath (the launcher fails to rotate its log and dies).
 - `fps_test.py` -- sets both limiter flags at runtime, reads them back through
-  the BeamNG log, and times `step(1)` before and after in one session.
+  the BeamNG log, and times `step(1)` before and after in one session. Kept as
+  the reproduction of the wrong result: it shows 31.14 -> 0.69 ms and proves
+  nothing about whether the simulation advanced.
+- `stage_probe.py` -- ONE episode, every stage of the brake event logged in
+  order, plus the distinct-tick count that actually settled this. Run it with
+  `--uncap off` (control) and `--uncap on` to reproduce both arms.

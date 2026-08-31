@@ -327,30 +327,12 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # untouched when deterministic, so the default path is byte-identical.
         self.deterministic = bool(deterministic)
         self.train_speed_factor = float(train_speed_factor)
-        # Before anything is timed: the frame limiter gates every request, and
-        # leaving it on costs 45x (see sim_clock.uncap_frame_rate). The wrap
-        # below re-applies it after every set_deterministic/set_nondeterministic,
-        # because uncapping only here was measured NOT to survive the env's
-        # per-reset mode changes (PPO-11: 17.0 steps/s, barely above the 13.9
-        # it was meant to fix).
         self.bng = sim_clock.wrap(self.bng, deterministic=self.deterministic,
                                   speed_factor=self.train_speed_factor)
-        # Measure rather than read the setting back: the read-back log line
-        # never surfaced in the instance's own log, and the per-step cost is
-        # the thing that actually matters. ~31 ms = limiter still in charge,
-        # ~0.7 ms = gone.
-        try:
-            sim_clock.uncap_and_verify(self.bng, log)
-        except Exception as e:
-            log.warning("could not verify frame limiter: %s: %s",
-                        type(e).__name__, e)
-        if not self.deterministic:
-            log.warning(
-                "FREE-RUNNING training at %.4gx: the policy decides once per "
-                "round trip instead of once per 5 ms, so 'steps' and "
-                "'stop_time_s' no longer mean what they mean in a "
-                "deterministic run. Compare these episodes by avg_g only.",
-                self.train_speed_factor)
+        # The frame limiter is deliberately LEFT ALONE. Removing it makes step()
+        # return without advancing physics -- 16.5 python steps per controller
+        # tick, measured -- so episodes never reach the stop and score zero.
+        # See the block in sim_clock.py and `stage_probe.py --uncap on`.
         self.pedal_range = pedal_range          # None => constant 1.0
         self.episode_pedal = 1.0
         low = np.concatenate([self.observation_space.low, [0.0]]).astype(np.float32)

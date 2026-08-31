@@ -85,43 +85,6 @@ class _FakeBng:
         self.stepped.append(n)
 
 
-def test_deterministic_still_steps_the_real_handle():
-    """The deterministic path keeps its exact timing semantics: step() and
-    control forward untouched. Only `settings` is intercepted, and only so the
-    frame limiter cannot creep back (PPO-11 measured it creeping back)."""
-    import sim_clock
-    bng = _FakeBng()
-    guard = sim_clock.wrap(bng, deterministic=True)
-    guard.step(7)
-    assert bng.stepped == [7]
-    assert guard.scenario == "sentinel"
-
-
-def test_deterministic_reapplies_the_uncap_on_every_mode_change():
-    """Uncapping once at startup was measured NOT to survive: PPO-11 ran at
-    17.0 steps/s against the 13.9 it was meant to fix. The env changes mode on
-    every reset (abs_env_incar.py:229), so the uncap has to follow it."""
-    import sim_clock
-    bng = _FakeBng()
-    guard = sim_clock.wrap(bng, deterministic=True)
-    guard.settings.set_deterministic(200)
-    assert bng.settings.determ_hz == 200                 # still forwarded
-    assert any(c.startswith(sim_clock.FPS_UNCAP_LUA) for c in bng.control.lua)    # and re-applied
-    bng.control.lua.clear()
-    guard.settings.set_nondeterministic()
-    assert any(c.startswith(sim_clock.FPS_UNCAP_LUA) for c in bng.control.lua)
-
-
-def test_free_running_also_reapplies_the_uncap():
-    """The limiter gates every request, not just step(), so free-running pays
-    it too."""
-    import sim_clock
-    bng = _FakeBng()
-    clock = sim_clock.wrap(bng, deterministic=False, speed_factor=10)
-    clock.settings.set_deterministic(200)
-    assert any(c.startswith(sim_clock.FPS_UNCAP_LUA) for c in bng.control.lua)
-
-
 def test_the_uncap_uses_an_acknowledged_call_not_a_sleep():
     """queue_lua_command(response=True) blocks for the engine's reply. The
     fire-and-forget form created a real race: the env measured 13.35 ms and
@@ -373,56 +336,49 @@ def test_the_episode_mirror_follows_episodes_not_a_step_count():
     assert "every_n_steps=50" in src
 
 
-# ------------------------------------------------- the frame limiter
-def test_the_uncap_sets_both_limiter_flags():
-    """fpsLimitBackgroundEnabled matters as much as the main flag: a headless
-    instance has no focused window, and that limiter defaults to 5 FPS."""
-    import sim_clock
-    lua = sim_clock.FPS_UNCAP_LUA
-    assert "settings.setValue('fpsLimitEnabled', false)" in lua
-    assert "settings.setValue('fpsLimitBackgroundEnabled', false)" in lua
+# --------------------------------------- the frame limiter is load-bearing
+def test_nothing_uncaps_the_frame_limiter():
+    """Removing it makes step() return WITHOUT advancing physics.
+
+    Measured 2026-08-30, one episode each, nothing else differing:
+        limiter ON    702 steps -> 702 ticks (1:1), stopped, avg_g 0.9855, PASS
+        limiter OFF  1500 steps ->  91 ticks (16.5:1), never stopped, FAIL
+    step(N) decrements once per RENDERED FRAME (techCore.lua:559), and only the
+    limiter makes one frame carry one tick."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # The helpers stay so the experiment is reproducible; what must not happen
+    # is the training path invoking them.
+    for name in ("abs_env_residual.py", "abs_env_incar.py", "train_residual.py"):
+        src = open(os.path.join(root, name), encoding="utf-8").read()
+        called = [ln for ln in src.splitlines()
+                  if ("uncap_frame_rate(" in ln or "uncap_and_verify(" in ln)
+                  and not ln.strip().startswith("#")]
+        assert not called, f"{name} still uncaps the limiter: {called}"
 
 
-def test_the_uncap_goes_through_setvalue_not_the_json_file():
-    """Editing settings.json with the game closed was MEASURED to change
-    nothing (31.14 -> 31.03 ms). Only the runtime call took effect
-    (31.14 -> 0.69 ms), so the mechanism is the finding, not a detail."""
-    import sim_clock
-    assert "settings.setValue" in sim_clock.FPS_UNCAP_LUA
-
-
-def test_uncap_is_queued_on_the_game_engine_vm():
-    """`settings` lives on the GE VM, not the vehicle VM."""
+def test_the_deterministic_handle_is_the_real_one_again():
+    """UncapGuard existed only to keep the uncap applied. With the uncap gone,
+    the deterministic path is byte-identical to before any of this."""
     import sim_clock
     bng = _FakeBng()
-    sim_clock.uncap_frame_rate(bng)
-    assert len(bng.control.lua) == 1
-    assert bng.control.lua[0].startswith(sim_clock.FPS_UNCAP_LUA)
+    assert sim_clock.wrap(bng, deterministic=True) is bng
 
 
-def test_uncap_runs_at_env_startup():
+def test_the_reason_is_recorded_where_someone_would_retry_it():
+    """The next person to find 31 ms per step will reach for this. The numbers
+    that disprove it have to be in front of them."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    src = open(os.path.join(root, "abs_env_residual.py"), encoding="utf-8").read()
-    assert "sim_clock.uncap_and_verify(self.bng, log)" in src
+    src = open(os.path.join(root, "sim_clock.py"), encoding="utf-8").read()
+    assert "DO NOT UNCAP" in src
+    assert "702" in src and "91" in src
 
 
-def test_uncap_applies_in_both_clock_modes():
-    """The limiter gates every request, not just step(), so free-running pays it
-    too. Checked on the wrapper rather than on the env's source text: both
-    branches of sim_clock.wrap must re-apply it."""
+def test_the_free_run_clock_still_works():
+    """Free-running is unaffected -- it never used step()."""
     import sim_clock
-    for det in (True, False):
-        bng = _FakeBng()
-        h = sim_clock.wrap(bng, deterministic=det, speed_factor=4)
-        h.settings.set_deterministic(200)
-        assert any(c.startswith(sim_clock.FPS_UNCAP_LUA) for c in bng.control.lua), f"deterministic={det}"
-
-
-def test_the_env_verifies_the_uncap_instead_of_assuming_it():
-    """PPO-11 logged 'frame limiter uncapped' and then ran at 17 steps/s. A log
-    line claiming success is not evidence of success."""
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    src = open(os.path.join(root, "abs_env_residual.py"), encoding="utf-8").read()
-    assert "sim_clock.uncap_and_verify(self.bng, log)" in src
-    import sim_clock
-    assert sim_clock.UNCAP_OK_MS > 0
+    bng = _FakeBng()
+    clock = sim_clock.wrap(bng, deterministic=False, speed_factor=10)
+    clock.settings.set_deterministic(200)
+    assert "be:setPhysicsSpeedFactor(10)" in bng.control.lua
+    clock.step(20)
+    assert bng.stepped == []

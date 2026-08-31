@@ -26,7 +26,7 @@ import time
 
 import residual_log
 import sim_clock
-from abs_env_residual import ResidualABSEnv
+from abs_env_residual import ABSLearningEnvResidual
 from sim_config import load as load_cfg
 
 log = residual_log.setup_logging("logs/stage_probe.log", "stage")
@@ -48,6 +48,7 @@ def main():
                     help="off = leave BeamNG's frame limiter alone (the old, "
                          "working-but-slow behaviour) as the control")
     ap.add_argument("--steps", type=int, default=1500)
+    ap.add_argument("--port", type=int, default=64291)
     args = ap.parse_args()
 
     cfg = load_cfg("settings.json")
@@ -57,9 +58,10 @@ def main():
         sim_clock.uncap_frame_rate = lambda bng, verify=True: "SKIPPED"
         sim_clock.uncap_and_verify = lambda bng, log=None: None
 
-    env = ResidualABSEnv(sim_config=cfg,
-                         vehicle_pc="vehicles/etk800/Machine-Trainer-Boy-V2-MLABS.pc",
-                         deterministic=True)
+    env = ABSLearningEnvResidual(
+        port=args.port, env_index=0, sim_config=cfg,
+        vehicle_pc="vehicles/etk800/Machine-Trainer-Boy-V2-MLABS.pc",
+        deterministic=True)
     env.fixed_mph = [args.mph]
 
     log.info("=== stage probe: mph=%d uncap=%s ===", args.mph, args.uncap)
