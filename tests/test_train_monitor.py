@@ -1,6 +1,6 @@
 """The live training monitor's numbers.
 
-Every field here is read while a run is in flight and acted on -- "is it
+Every field here is read while a run is in flight and acted on, "is it
 learning", "how much longer", "did something break". The two easiest to get
 quietly wrong are the trend (which must not report the pedal draw as learning)
 and the ETA (which must not be a constant multiplied by a step count), so those

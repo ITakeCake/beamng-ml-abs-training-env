@@ -3,7 +3,7 @@
 docs/CONTROL_CEILING.md measured what this channel can do without any learning: a
 per-wheel proportional slip regulator at 400 Hz stops in 54.8 m for 1.189 g, past
 the 1.180 g goal and level with stock ABS. PPO's problem is not that the policy
-class cannot express that controller -- it is that white per-step exploration
+class cannot express that controller, it is that white per-step exploration
 noise, on an optimum only ~0.05 wide in release, rarely lands on it.
 
 So hand PPO the answer as a starting point instead of a target: fit the policy by
@@ -82,7 +82,7 @@ def main():
     obs, act = data["obs"].astype(np.float32), data["act"].astype(np.float32)
     if obs.shape[1] != obs_dim or act.shape[1] != act_dim:
         raise SystemExit("recorded shapes %s/%s do not match the configured "
-                         "%d/%d -- the recording must come from the same "
+                         "%d/%d, the recording must come from the same "
                          "wheel_mode and observation contract"
                          % (obs.shape, act.shape, obs_dim, act_dim))
     print("teacher pairs: %d" % len(obs))
@@ -100,7 +100,7 @@ def main():
         policy_kwargs=bounded_policy_kwargs(
             # Must match train_cosim's fresh-model path exactly: ReLU and a
             # pi/vf net_arch dict. SB3 defaults to Tanh, which silently built a
-            # different network from the one the trainer builds -- and
+            # different network from the one the trainer builds, and
             # export_policy_weights only emits ReLU layers, so a Tanh
             # checkpoint cannot be deployed to the car at all.
             dict(activation_fn=th.nn.ReLU,

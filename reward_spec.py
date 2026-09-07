@@ -2,17 +2,17 @@
 
 Four presets ship:
 
-  RewardSpec.v5()          -- the frozen default. Reproduces the protected
+  RewardSpec.v5()        , the frozen default. Reproduces the protected
                               abs_env.py's numbers EXACTLY; a parity test
                               asserts this against the real constants and
                               _terminal_g_shape, not a recorded snapshot.
-  RewardSpec.normalized()  -- anchors moved onto the per-config MEASURED
+  RewardSpec.normalized(), anchors moved onto the per-config MEASURED
                               references (calibration.py): zero at stock ABS,
                               strongly negative at lockup.
-  RewardSpec.v6()          -- target-free, G-primary reward. Scores sustained
+  RewardSpec.v6()        , target-free, G-primary reward. Scores sustained
                               positive deceleration over a short rolling
                               window, with a small terminal stability guard.
-  RewardSpec.v7()          -- v6's terminal G and stability guard, but the
+  RewardSpec.v7()        , v6's terminal G and stability guard, but the
                               per-step signal is a banded true-slip term
                               instead of dense G: reward at/below 0.50 slip,
                               penalty above it, 3x penalty at/above 0.99.
@@ -20,7 +20,7 @@ Four presets ship:
 Why normalized exists, in one measurement (etk800, 60 mph, dry, 2026-08-29):
 v5.0 pays +966 for locking the wheels, +987 for this project's best result
 (1.043 g) and +5049 for what stock ABS does unaided (1.188 g). Its "exceptional
-performance" gatekeeper sits at 1.06 g -- BELOW stock. The absolute shape could
+performance" gatekeeper sits at 1.06 g, BELOW stock. The absolute shape could
 not distinguish the brake-slammer local optimum from real progress.
 
 No game imports.
@@ -109,7 +109,7 @@ class RewardSpec:
     # --- v11: confine the distance integral to the scored window -------
     # The env couples ~4.5 m/s above the 80 mph trigger and the metric only
     # opens at the crossing, so a policy that does not brake coasts ~19 s and
-    # ~760 m before it is scored at all -- fourteen times the ~55 m the metric
+    # ~760 m before it is scored at all, fourteen times the ~55 m the metric
     # actually measures. metric_window_only charges the distance integral only
     # while tel_brake_active is set, making the dense sum exactly minus the
     # scored stopping distance; approach_time_k is a flat per-second cost
@@ -319,7 +319,7 @@ class RewardSpec:
         Both failures are pinned below the worst legitimate stop. A 0.4 g stop
         scores about -337 (163 m of dense cost plus a -174 terminal), and a
         timeout that crawls to a halt accrues only ~-142 of dense cost because
-        speed -- and therefore cost -- decays as it slows. Leaving the timeout
+        speed, and therefore cost, decays as it slows. Leaving the timeout
         unpenalised made NOT stopping the higher-scoring option, which PPO-60
         found within eleven episodes.
         Terminal is a ramp through the measured lockup g, so beating a locked
@@ -363,7 +363,7 @@ class RewardSpec:
         band is 8/s per wheel. Sized against v9's ~12 point distance span and
         ~100 point terminal span: four wheels past the band for a whole 5.5 s
         stop costs 11, four locked costs 44. Enough to make lockup lose, not
-        enough to make the constraint the objective -- which is what killed v7
+        enough to make the constraint the objective, which is what killed v7
         (its "ok" band ran to 0.50 slip, deep past the peak, and it had no dense
         objective at all to trade against).
         """
@@ -386,7 +386,7 @@ class RewardSpec:
         policy that is not yet braking coasts on drag alone until it crosses.
         Under v9 that approach accrued roughly -760 of distance cost against the
         ~-55 the measured stop is worth, so the reward was mostly grading a
-        phase the metric ignores -- the same signal-to-noise failure v9 was
+        phase the metric ignores, the same signal-to-noise failure v9 was
         written to fix, arriving through a different door.
 
         v11 charges the metre-by-metre cost only while tel_brake_active is set,
@@ -478,7 +478,7 @@ class RewardSpec:
         if refs is None:
             raise ValueError(
                 "this reward spec is normalized but no calibration references "
-                "were supplied -- refusing to score against absolute anchors "
+                "were supplied, refusing to score against absolute anchors "
                 "(that is exactly the bug normalization exists to fix).")
         slam_g, stock_g = refs
         return normalized_g(g, slam_g, stock_g)

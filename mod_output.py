@@ -30,7 +30,7 @@ def mod_dir_for(content_userpath):
 
 def generate_all_cars(vehicles_dir, out_mod_dir):
     """Writes one ml_abs_parent.jbeam per supported car. Returns
-    (written_models, skipped_models) -- skipped = Car-type models with no
+    (written_models, skipped_models), skipped = Car-type models with no
     ABS-ish slot in their own jbeam (can't host this mod without overriding a
     stock body/brakes part, out of scope for v1)."""
     all_models = {m.name for m in scan_models(vehicles_dir)}
@@ -53,7 +53,7 @@ def generate_all_cars(vehicles_dir, out_mod_dir):
 
 
 def _run_exporter(cmd):
-    """Real subprocess call -- monkeypatched in tests. Returns (ok, message)."""
+    """Real subprocess call, monkeypatched in tests. Returns (ok, message)."""
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         return False, (result.stdout + result.stderr).strip()
@@ -99,7 +99,7 @@ def _deployment_spec(run_info):
 
 def export_model_to_game(run_info, out_mod_dir, python_exe=None):
     """Runs export_policy_weights.py against this run's checkpoint, then
-    merges a child jbeam part in -- read-merge-write, so exporting model B
+    merges a child jbeam part in, read-merge-write, so exporting model B
     never erases model A's entry for the same car."""
     weights_name = _weights_module_name(run_info)
     weights_lua = os.path.join(out_mod_dir, "lua", "vehicle", "controller",
@@ -118,7 +118,7 @@ def export_model_to_game(run_info, out_mod_dir, python_exe=None):
     if not ok:
         return False, msg
 
-    # Export is self-contained even if the user has not clicked Install/Update
+    # Export is self-contained even even without a prior clicked Install/Update
     # Assets since this controller was added.
     controller_name = spec["controller"] + ".lua"
     controller_src = os.path.join(
@@ -148,7 +148,7 @@ def export_model_to_game(run_info, out_mod_dir, python_exe=None):
 def remove_model_from_game(run_info, out_mod_dir):
     """Removes this run's entry from its car's ml_abs_models.jbeam and its
     weights lua file. Only ever touches the one entry named for this
-    run -- never the whole file, never another model's data."""
+    run, never the whole file, never another model's data."""
     models_path = _models_jbeam_path(run_info, out_mod_dir)
     part_name = f"mlabs_model_{run_info.run_name}"
     if os.path.isfile(models_path):

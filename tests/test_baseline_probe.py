@@ -1,5 +1,5 @@
 """pedal_gate_verdict is the pure decision logic for GATE 3 (pedal scaling
-reaches the wheels) -- no game imports, testable offline."""
+reaches the wheels), no game imports, testable offline."""
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from baseline_probe import pedal_gate_verdict

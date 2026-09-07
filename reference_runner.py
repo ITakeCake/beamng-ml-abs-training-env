@@ -6,7 +6,7 @@ MTB-ML-ABS controller to engage before an episode counts, so it structurally
 cannot measure a car whose ABS slot holds the *stock* part. This is the same
 drive-brake-measure sequence with the controller handshake removed.
 
-Critical invariant -- this runner NEVER calls abstelemetry.setBrakes(). That is
+Critical invariant, this runner NEVER calls abstelemetry.setBrakes(). That is
 what latches abstelemetry's `perWheelMode` and makes it scale per-wheel
 brakeTorque every physics tick; with it off (and releaseBrakes() called
 defensively at each reset) BeamNG's own brake pipeline owns the brakes
@@ -55,12 +55,12 @@ MEASURE_OFFSET_MS = 1.0     # abs_env: setTargetSpeed(target_ms - 1.0)
 ACCEL_OVERSHOOT_MPH = 2.0   # abs_env: accelerate to target+2, then coast in gear
 STOP_SPEED_MS = 0.05
 STOP_FRAMES = 15
-MAX_STOP_STEPS = 6000       # 30 s at 200 Hz -- a stop that long has gone wrong
+MAX_STOP_STEPS = 6000       # 30 s at 200 Hz, a stop that long has gone wrong
 PROBE_STEPS = 600           # 3 s of steady-state cornering at 200 Hz
 PROBE_SETTLE_STEPS = 300    # first 1.5 s is turn-in transient, not a radius
 
 # The two reference cars: identical except for the ABS slot (verified by diffing
-# their parts blocks -- ESC and TC are empty in BOTH, so ABS is the only variable).
+# their parts blocks, ESC and TC are empty in BOTH, so ABS is the only variable).
 REFERENCE_CARS = {
     "slam": "vehicles/etk800/Machine-Trainer-Boy-V2.pc",             # etk_DSE_ABS = "" (none)
     "stock": "vehicles/etk800/Machine-Trainer-Boy-V2-STOCKABS.pc",   # etk_DSE_ABS = stock part
@@ -74,11 +74,11 @@ ABS_BEHAVIOR = {"slam": "off", "stock": "realistic"}
 def check_supported(grip, radius_m, steering=None):
     """Guard for dimensions the runner cannot measure honestly. Refusing loudly
     beats silently measuring a straight line and writing the result under a key
-    that claims otherwise -- a wrong calibration row is worse than a missing
+    that claims otherwise, a wrong calibration row is worse than a missing
     one, because training will happily consume it."""
     if radius_m is not STRAIGHT and steering is None:
         raise ValueError(
-            f"radius_m={radius_m} was asked for with no steering angle -- the car "
+            f"radius_m={radius_m} was asked for with no steering angle, the car "
             f"would brake in a straight line and the result would be written under "
             f"a key claiming a corner. Run the steering seek first.")
 
@@ -104,7 +104,7 @@ class ReferenceRunner:
     stop and lets the game free-run instead.
 
     Both change the regime the number was produced in, and the project's own
-    notes record deterministic-vs-live moving braking g by 0.04-0.09 -- a third
+    notes record deterministic-vs-live moving braking g by 0.04-0.09, a third
     of the stock-over-slam margin. So neither is a silent default: they are
     flags, and a table measured with them is only comparable to other tables
     measured the same way."""
@@ -183,7 +183,7 @@ class ReferenceRunner:
         # at 0 means the latch's write is overwritten 60 times a second and the
         # car coasts on engine braking alone (~0.6 m/s^2, measured). Stepped
         # mode re-sent this every step and the file's own comment says why --
-        # "the car simply never stopped" -- which is exactly what happened here.
+        # "the car simply never stopped", which is exactly what happened here.
         self.vehicle.control(brake=float(pedal), throttle=0.0)
         deadline = time.monotonic() + 90.0
         result_g = 0.0
@@ -237,7 +237,7 @@ class ReferenceRunner:
         if result["avg_g_arc"] <= 0.0:
             raise RuntimeError(
                 f"no brake event completed within 90s ({self.reference}, "
-                f"{speed_mph} mph, live x{self.speed_factor}) -- the 2 kHz latch "
+                f"{speed_mph} mph, live x{self.speed_factor}), the 2 kHz latch "
                 f"never fired or the car never stopped.")
         return result
 
@@ -249,7 +249,7 @@ class ReferenceRunner:
 
     def _install_telemetry(self):
         """abstelemetry.lua must be resolvable by extensions.load() in the live
-        userpath -- same mechanism abs_env uses, done explicitly here."""
+        userpath, same mechanism abs_env uses, done explicitly here."""
         import shutil
         from pathlib import Path
         try:
@@ -274,7 +274,7 @@ class ReferenceRunner:
 
         `steering` is the signed open-loop angle for a corner (None = straight).
         It goes on at the same moment training's CornerSteerInjector applies it
-        -- immediately after the slam is armed -- and is then left alone, since
+      , immediately after the slam is armed, and is then left alone, since
         vehicle.control only sends the inputs it is given."""
         check_supported(grip, radius_m, steering)
 
@@ -318,7 +318,7 @@ class ReferenceRunner:
             self.vehicle.sensors.poll()
             e = self.vehicle.sensors["electrics"]
             # tel_inst_speed is computed in onPhysicsStep; electrics.airspeed is
-            # GFX-rate and LAGS when physics outruns graphics -- exactly what
+            # GFX-rate and LAGS when physics outruns graphics, exactly what
             # abstelemetry v3.3's own comment warns about at speed_factor > 1.
             # Reading the laggy one at 10x overshoots the target badly.
             spd = float(e.get("tel_inst_speed", e.get("airspeed", 0.0)))
@@ -334,7 +334,7 @@ class ReferenceRunner:
         if self.live:
             # Free-running: the 2 kHz latch and the brake-event accumulator are
             # entirely in Lua, so the measurement does not need Python in the
-            # loop at all -- stepping only ever paced the stop-detection poll.
+            # loop at all, stepping only ever paced the stop-detection poll.
             self._set_speed_factor(self.speed_factor if self.speed_factor > 1.0 else 0)
         else:
             self.bng.control.pause()
@@ -348,7 +348,7 @@ class ReferenceRunner:
         self.vehicle.queue_lua_command(
             f"extensions.abstelemetry.armBrakeSlam({target_ms}, {float(pedal)})")
         # Grip is armed the SAME way training arms it (at brake onset, after the
-        # slam target is set) -- a reference measured with different timing is
+        # slam target is set), a reference measured with different timing is
         # not comparable to the runs it is meant to be the ruler for.
         if float(grip) != 1.0:
             self.vehicle.queue_lua_command(
@@ -369,7 +369,7 @@ class ReferenceRunner:
                 f"brake slam never fired ({self.reference}, {speed_mph} mph, "
                 f"speed_factor={self.speed_factor}, live={self.live}). The latch "
                 f"compares physics-rate instSpeed against the target every tick, "
-                f"so this means the car never crossed it -- usually the coast "
+                f"so this means the car never crossed it, usually the coast "
                 f"never started (throttle still on) or the run-up overshot so far "
                 f"the target was already passed when the slam was armed.")
 
@@ -377,7 +377,7 @@ class ReferenceRunner:
         # The pedal must be re-sent from the Python side every step, not just
         # latched in Lua: the game's own input update runs at ~60 Hz and will
         # otherwise write input.brake back down from the last vehicle.control
-        # value, fighting the 2 kHz latch (observed live -- the car simply never
+        # value, fighting the 2 kHz latch (observed live, the car simply never
         # stopped). Training sends brake=1.0 every step for exactly this reason.
         # The one-shot neutral drop below ~2.5 mph is also training's regime:
         # the automatic box creeps against the brakes at walking pace otherwise.
@@ -403,7 +403,7 @@ class ReferenceRunner:
 
         # In stepped mode the pedal is re-sent every step: the game's ~60 Hz
         # input update otherwise writes input.brake back down, fighting the
-        # 2 kHz latch (observed live -- the car simply never stopped).
+        # 2 kHz latch (observed live, the car simply never stopped).
         stop_deadline = time.monotonic() + 60.0
         for _ in range(MAX_STOP_STEPS):
             self.vehicle.sensors.poll()
@@ -459,14 +459,14 @@ class ReferenceRunner:
             raise RuntimeError(f"car never came to a stop ({self.reference}, {speed_mph} mph)")
         if result["avg_g_arc"] <= 0.0:
             raise RuntimeError(
-                f"brake event produced no arc-g ({self.reference}, {speed_mph} mph) -- "
+                f"brake event produced no arc-g ({self.reference}, {speed_mph} mph), "
                 f"the 2 kHz state machine never completed a measurement")
         return result
 
     def probe_radius(self, speed_mph, steering, grip=1.0):
         """Hold `steering` at roughly constant speed and read back the radius
         the car actually describes: R = v / yaw_rate, averaged over the settled
-        half of the hold. No braking -- this measures geometry only.
+        half of the hold. No braking, this measures geometry only.
 
         Speed is held by a crude proportional throttle rather than a fixed
         pedal: understeer scrubs speed off, and a car that is decelerating
@@ -534,7 +534,7 @@ class ReferenceRunner:
         """Find the open-loop angle that holds `radius_m` at this speed and
         grip. Iterative because the angle->radius map is not known a priori
         (wheelbase, understeer, grip all move it) and is not linear near the
-        limit -- see corner.steering_seek_update for the damping."""
+        limit, see corner.steering_seek_update for the damping."""
         steering = initial_steering_guess(radius_m)
         history = []
         for _ in range(STEERING_SEEK_MAX_ITERS):
@@ -547,7 +547,7 @@ class ReferenceRunner:
             if mean_yaw * direction <= 0.0:
                 raise RuntimeError(
                     f"steering {direction * steering:+.4f} produced yaw "
-                    f"{mean_yaw:+.4f} rad/s -- opposite signs. The steering and "
+                    f"{mean_yaw:+.4f} rad/s, opposite signs. The steering and "
                     f"yaw-rate sign conventions disagree; every corner would be "
                     f"driven against its own yaw target.")
             history.append((steering, measured))
@@ -561,7 +561,7 @@ class ReferenceRunner:
                     f"{lateral_g_for_radius(speed_ms, best_r):.2f} g of lateral load. "
                     f"R={radius_m} m would need "
                     f"{lateral_g_for_radius(speed_ms, radius_m):.2f} g.\n\n"
-                    f"Pick a corner by grip budget instead -- braking in a turn only "
+                    f"Pick a corner by grip budget instead, braking in a turn only "
                     f"tests ABS if there is grip left to brake with. At {speed_mph} "
                     f"mph: {radius_for_lateral_g(speed_ms, 0.3):.0f} m = 0.3 g, "
                     f"{radius_for_lateral_g(speed_ms, 0.4):.0f} m = 0.4 g, "
@@ -590,8 +590,8 @@ def run_calibration(sim_cfg, car, speeds, reps, grips=(1.0,), radius_m=STRAIGHT,
                     pedals=(1.0,), speed_factor=1.0, live=False):
     """Measures both references at every (speed, grip) and writes the table.
 
-    For a corner, the steering angle is sought FIRST -- once per (speed, grip),
-    on the slam car -- and the same angle then drives every reference stop and,
+    For a corner, the steering angle is sought FIRST, once per (speed, grip),
+    on the slam car, and the same angle then drives every reference stop and,
     later, every training episode on that row. One procedure for all three is
     the only thing that makes "stock's advantage in this corner" mean what it
     says."""
@@ -625,8 +625,8 @@ def run_calibration(sim_cfg, car, speeds, reps, grips=(1.0,), radius_m=STRAIGHT,
             for mph in speeds:
                 for grip in grips:
                     # Steering belongs to the geometry, so it is sought and
-                    # stored once per (grip, speed, radius) -- at the full-pedal
-                    # key -- and reused for every pedal level below.
+                    # stored once per (grip, speed, radius), at the full-pedal
+                    # key, and reused for every pedal level below.
                     geom_key = config_key(grip=grip, speed_mph=mph, radius_m=radius_m)
                     steering = (None if radius_m is STRAIGHT
                                 else table.steering_for(geom_key))
@@ -677,14 +677,14 @@ def parse_args():
                         "cannot reach the full-pedal lockup floor.")
     p.add_argument("--speed-factor", type=float, default=1.0,
                    help="fast-forward the engine by this factor "
-                        "(be:setPhysicsSpeedFactor -- BeamNG's own ESC calibration "
+                        "(be:setPhysicsSpeedFactor, BeamNG's own ESC calibration "
                         "uses 2). 1 = off. Changes the regime the number was "
                         "measured in, so a table is only comparable to others "
                         "measured the same way.")
     p.add_argument("--live", action="store_true",
                    help="measure the stop free-running instead of stepped. The "
                         "2 kHz measurement is entirely in Lua, so stepping only "
-                        "ever paced the stop-detection poll -- but live and "
+                        "ever paced the stop-detection poll, but live and "
                         "deterministic give different g (0.04-0.09 apart).")
     p.add_argument("--corner", default="straight",
                    help='corner radius in metres, "50" / "50L" / "50R"; '

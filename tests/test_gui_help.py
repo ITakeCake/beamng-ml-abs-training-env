@@ -60,7 +60,7 @@ def test_learning_rate_help_is_shared_by_both_algorithms():
 
 
 def test_the_learning_starts_trap_is_documented():
-    """Setting it above total steps means nothing is ever learned -- the exact
+    """Setting it above total steps means nothing is ever learned, the exact
     mistake that produced a run of pure random actions in this project."""
     text = gui_help.help_for("sac", "learning_starts").lower()
     assert "never learns" in text or "never learn" in text

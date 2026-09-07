@@ -2,16 +2,16 @@
 training starts.
 
 GATE 1 (slam baseline): zero action ([0,0], no release) must reproduce the known
-lockup baseline (~0.85-0.95g on sport_plus tires -- CLAUDE.md: "full lockup ~= 0.9g
+lockup baseline (~0.85-0.95g on sport_plus tires, CLAUDE.md: "full lockup ~= 0.9g
 on sport_plus, models below that prove nothing"). If it doesn't, the pedal-hold or
 the action-inversion path is broken and nothing downstream can be trusted.
 
 GATE 2 (release helps): a scripted mid-stop release must beat the slam mean. If it
-doesn't, releasing brake torque isn't reaching the wheels -- the mailbox path is
-broken -- and training would never discover it either.
+doesn't, releasing brake torque isn't reaching the wheels, the mailbox path is
+broken, and training would never discover it either.
 
 GATE 3 (pedal scaling reaches the wheels): the untested premise flagged in the
-2026-08-28 review -- gates 1/2 above both run at pedal=1.0, so the residual math
+2026-08-28 review, gates 1/2 above both run at pedal=1.0, so the residual math
 `brake = pedal * (1 - release)` was never exercised at any OTHER pedal value.
 If the slam-latch (abstelemetry's armBrakeSlam) or the controller's driver-pedal
 override beats the mailboxed brake command, pedal cancels out of the physics and
@@ -21,7 +21,7 @@ enough pedal may not even reach the STOP threshold (TIMEOUT -> avg_g=0 by
 convention), while peak_g is logged on every outcome.
 
 avg_g/stopping_dist_m are only ever written to the episode CSV log by abs_env.py
-(never returned via step()'s info dict, which stays {} on every path) -- this
+(never returned via step()'s info dict, which stays {} on every path), this
 probe reads them back from that log rather than editing the byte-identical copy.
 """
 import argparse
@@ -54,7 +54,7 @@ def _last_episode_row():
 def pedal_gate_verdict(peak_g_full, peak_g_low, margin=0.1):
     """Pure decision logic (no game imports) so it's testable offline. PASS
     only if the low-pedal mean peak_g is clearly below the full-pedal mean by
-    at least `margin` g -- a margin this large can't be explained by
+    at least `margin` g, a margin this large can't be explained by
     episode-to-episode noise (GATE 1/2 history: ~0.01-0.02g spread)."""
     if not peak_g_full or not peak_g_low:
         return False, "missing data (no episodes recorded for one or both pedal levels)"
@@ -99,7 +99,7 @@ def parse_args():
     p.add_argument("--userpath", default=None)
     p.add_argument("--port", type=int, default=64291)
     p.add_argument("--skip-pedal-gate", action="store_true",
-                   help="skip GATE 3 (pedal scaling) -- e.g. to re-check gates 1/2 quickly")
+                   help="skip GATE 3 (pedal scaling), e.g. to re-check gates 1/2 quickly")
     return p.parse_args()
 
 
@@ -158,24 +158,24 @@ def main():
     if slam_gs:
         slam_mean = sum(slam_gs) / len(slam_gs)
         # Band is 0.7-1.05g, deliberately wider than the ~0.85-0.95g figure quoted
-        # elsewhere for a DIFFERENT car/tire config -- this vehicle's own measured
+        # elsewhere for a DIFFERENT car/tire config, this vehicle's own measured
         # floor (2026-08-27, 3 episodes: 1.020/1.029/1.035) is ~1.03g, so the band
         # is sized to catch a broken pedal-hold/inversion path (near 0 or near
         # peak-g), not to match a number from a different car.
         print(f"SLAM mean avg_g = {slam_mean:.3f} "
-              f"({'PASS' if 0.7 <= slam_mean <= 1.05 else 'FAIL'} -- band is 0.7-1.05g; "
+              f"({'PASS' if 0.7 <= slam_mean <= 1.05 else 'FAIL'}, band is 0.7-1.05g; "
               f"this vehicle's measured floor is ~1.03g, not the ~0.85-0.95g figure "
               f"documented for a different car config)")
     else:
         slam_mean = None
-        print("SLAM: FAIL -- no STOP episodes recorded")
+        print("SLAM: FAIL, no STOP episodes recorded")
 
     if release_gs and slam_mean is not None:
         release_mean = sum(release_gs) / len(release_gs)
         print(f"SCRIPTED-RELEASE mean avg_g = {release_mean:.3f} "
-              f"({'PASS' if release_mean > slam_mean else 'FAIL'} -- must exceed SLAM mean)")
+              f"({'PASS' if release_mean > slam_mean else 'FAIL'}, must exceed SLAM mean)")
     else:
-        print("SCRIPTED-RELEASE: FAIL -- no STOP episodes recorded, or SLAM gate failed first")
+        print("SCRIPTED-RELEASE: FAIL, no STOP episodes recorded, or SLAM gate failed first")
 
     if pedal_result is not None:
         ok, msg = pedal_result

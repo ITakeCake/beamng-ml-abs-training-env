@@ -1,7 +1,7 @@
 """Reads the BeamNG install's own vehicle zips + a userpath's custom configs
 to drive the GUI's Model -> Trim -> Custom car picker.
 
-No game imports -- pure zip/json/filesystem reading, unit-testable offline.
+No game imports, pure zip/json/filesystem reading, unit-testable offline.
 Results are cached by the GUI (vehicles_<version>.json under cache/) since
 scanning every zip in content/vehicles/ on each open is slow.
 """
@@ -14,23 +14,23 @@ import zipfile
 
 
 # Models the shipped ML-ABS controller mod actually targets (see assets/mods/
-# mtb_ml_abs -- its jbeam declares an etk800-only slotType). Selecting any
+# mtb_ml_abs, its jbeam declares an etk800-only slotType). Selecting any
 # other model still works mechanically (you can train/deploy a standard ABS
 # replacement), but the reward/gates/controller were only ever validated on
-# this one -- the GUI shows a warning rather than a silent wrong assumption.
+# this one, the GUI shows a warning rather than a silent wrong assumption.
 SUPPORTED_ML_ABS_MODELS = {"etk800"}
 
 
 @dataclasses.dataclass
 class ModelInfo:
-    name: str            # zip/folder name, e.g. "etk800" -- the partConfig prefix
+    name: str            # zip/folder name, e.g. "etk800", the partConfig prefix
     display_name: str    # info.json "Name", e.g. "800-Series"
     zip_path: str
 
 
 @dataclasses.dataclass
 class TrimInfo:
-    pc_name: str          # .pc filename without extension -- goes into the
+    pc_name: str          # .pc filename without extension, goes into the
                           # "vehicles/<model>/<pc_name>.pc" partConfig string
     display_name: str     # info_<pc_name>.json "Configuration", else pc_name
 
@@ -80,7 +80,7 @@ def scan_trims(zip_path, model):
 
 
 def scan_custom_configs(userpath, model):
-    """Every *.pc a user saved under <userpath>/vehicles/<model>/ -- these have
+    """Every *.pc a user saved under <userpath>/vehicles/<model>/, these have
     no info_<trim>.json (that only ships inside the stock zip), so display_name
     is always just the filename."""
     car_dir = os.path.join(userpath, "vehicles", model)
@@ -118,7 +118,7 @@ def unique_model_labels(models):
 # The in-car training loop needs the ML ABS controller present on the car: the
 # env spawns, slams the brakes, then waits for the controller to publish
 # mlabs_active. A .pc without that part never publishes anything, so the wait
-# times out with "active=None" -- an error that describes the symptom and not
+# times out with "active=None", an error that describes the symptom and not
 # the cause, two minutes after the game booted.
 ML_ABS_PART_PREFIX = "etk_DSE_ABS_MTB_ML"
 ABS_SLOT_HINT = "ABS"

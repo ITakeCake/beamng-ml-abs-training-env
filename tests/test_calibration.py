@@ -1,5 +1,5 @@
 """calibration.py: the measured per-config reference table that the normalized
-reward anchors on. Pure data/math -- no game imports."""
+reward anchors on. Pure data/math, no game imports."""
 import json
 import os
 import sys
@@ -100,7 +100,7 @@ def test_table_references_returns_slam_and_stock_medians():
 
 def test_table_references_missing_row_raises_loudly():
     """A missing config must refuse, never silently fall back to another
-    config's anchors -- that would train against the wrong zero point."""
+    config's anchors, that would train against the wrong zero point."""
     t = CalibrationTable(car="etk800")
     with pytest.raises(KeyError):
         t.references(config_key(grip=0.4, speed_mph=60, radius_m=None))

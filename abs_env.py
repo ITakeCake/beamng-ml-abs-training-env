@@ -1,5 +1,5 @@
 """
-ABS Learning Environment — standalone module for single or parallel training.
+ABS Learning Environment, standalone module for single or parallel training.
 Accepts port, env_index, and user_path for multi-instance support.
 """
 import gymnasium as gym
@@ -29,12 +29,12 @@ MIN_MPH = 25
 MAX_MPH = 100
 
 # --- LSTM DATA RECORDING ---
-# Blake's directive 2026-06-03: run EXACTLY ONE recorder — the 99-col 2kHz one.
+# run EXACTLY ONE recorder, the 99-col 2kHz one.
 #   RECORD_LSTM=True      -> lstm2khz.lua, 99-col raw 2kHz format -> recorded_data_2khz/SAC/
 #   RECORD_SAC_DATA=False -> the old 27-col SAC-Data export is OFF (never run both)
 # Root cause of the earlier 0-CSV failure (fixed in reset()):
 #   vehicle.teleport(reset=True) UNLOADS vehicle lua extensions. abstelemetry was
-#   re-loaded right after the teleport but lstm2khz was NOT — so every guarded call
+#   re-loaded right after the teleport but lstm2khz was NOT, so every guarded call
 #   ("if extensions.lstm2khz then ...") silently no-opped from episode 2 onward.
 #   Fix = reload lstm2khz beside abstelemetry each reset + verify before
 #   startRecording (the proven lstm_data_env.py pattern). vlua sandbox: relative
@@ -72,15 +72,15 @@ YAW_BONUS_K_TERMINAL = 300.0     # terminal one-shot if cumulative integral stay
 YAW_BONUS_THRESHOLD  = 0.1       # cumulative |yaw_rate|·dt under this ⇒ full bonus, scales linearly to 0
 YAW_PEN_K_TERMINAL   = 5000.0    # KEPT: terminal accumulator (catastrophic-yaw backstop, on excess²)
 YAW_RATE_DEADZONE_RAD_S = 0.05   # only excess above this counts toward catastrophic accumulator
-# REMOVED v5.0: YAW_PEN_K_STEP (replaced by positive yaw bonus — cleaner inverse signal)
+# REMOVED v5.0: YAW_PEN_K_STEP (replaced by positive yaw bonus, cleaner inverse signal)
 
 CRASH_HEADING       = 1.571      # ~90° heading deviation = crash terminate
-SLIP_THRESHOLD      = 0.3        # legacy — UNUSED (slip reward removed)
-SLIP_REWARD_K       = 0.5        # legacy — UNUSED
+SLIP_THRESHOLD      = 0.3        # legacy, UNUSED (slip reward removed)
+SLIP_REWARD_K       = 0.5        # legacy, UNUSED
 
 # --- CRASH DETECTION ---
 MAX_EPISODE_STEPS = 5000  # 25s at 200Hz (comment fixed 2026-07-11; was stale "20s at 250Hz")
-STOP_FRAMES       = 15    # frames at <0.05m/s before terminal (75ms at 200Hz — fast stop detection)
+STOP_FRAMES       = 15    # frames at <0.05m/s before terminal (75ms at 200Hz, fast stop detection)
 CRASH_PENALTY     = -2000.0  # bumped from -500: scaled to v5.0 reward magnitudes
 
 
@@ -158,7 +158,7 @@ class ABSLearningEnv(gym.Env):
 
         # speedup: Python on P-core 0 (cores 0,1), BeamNG on remaining (cores 2-15)
         # 12600K layout: 0-11 = 6 P-cores w/ HT, 12-15 = 4 E-cores
-        # TCP_NODELAY already set by beamngpy 1.35 internally — no extra work needed.
+        # TCP_NODELAY already set by beamngpy 1.35 internally, no extra work needed.
         self._apply_performance_tuning(
             python_cores=[0, 1], beamng_cores=list(range(2, 16)))
 
@@ -183,7 +183,7 @@ class ABSLearningEnv(gym.Env):
         # except Exception as e:
         #     print(f"{self._prefix} set_velocity FAILED: {e}")
 
-        # (TCP_NODELAY already set by beamngpy internally — no extra work needed)
+        # (TCP_NODELAY already set by beamngpy internally, no extra work needed)
 
         # .tech: set freeroam gamestate so vehicle controls actually take effect,
         # then hide the UI overlay.
@@ -240,13 +240,13 @@ class ABSLearningEnv(gym.Env):
         self.vehicle.queue_lua_command('wheels.setABSBehavior("off")')
         self.bng.step(5)
 
-        # Action: 4-wheel brakes only (speed-guesser removed per Rule 2 — only g-forces in reward)
+        # Action: 4-wheel brakes only (speed-guesser removed per Rule 2, only g-forces in reward)
         self.action_space = gym.spaces.Box(low=0.0, high=1.0, shape=(4,), dtype=np.float32)
         # Obs: 31 − 4 (brk_actual_* dropped: physics cheat, redundant w/ prev_brakes) = 27
         # Per-sensor sanity bounds applied via _clip_obs() before returning.
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(27,), dtype=np.float32)
 
-        # Sanity bounds for each obs dim — clipping prevents NaN/inf/garbage from poisoning the policy.
+        # Sanity bounds for each obs dim, clipping prevents NaN/inf/garbage from poisoning the policy.
         # Order matches the obs vector layout below. Wide-but-finite ranges; anything outside = sensor fault.
         self._OBS_LOW = np.array([
             0.0, 0.0, 0.0, 0.0,                         # 0-3:  wheel speeds (m/s)
@@ -303,8 +303,8 @@ class ABSLearningEnv(gym.Env):
         self.ep_peak_slip = 0.0
         self.ep_max_yaw = 0.0
         self.ep_stopping_dist = 0.0
-        self.ep_yaw_sq_sum = 0.0    # ∫ (excess yaw_rate above deadzone)² dt — catastrophic backstop
-        self.ep_yaw_abs_sum = 0.0   # NEW v5.0: ∫|yaw_rate|·dt — matches "perfect yaw < 0.1" metric
+        self.ep_yaw_sq_sum = 0.0    # ∫ (excess yaw_rate above deadzone)² dt, catastrophic backstop
+        self.ep_yaw_abs_sum = 0.0   # NEW v5.0: ∫|yaw_rate|·dt, matches "perfect yaw < 0.1" metric
         self._ep_wall_start = time.monotonic()
 
         # CSV episode log
@@ -342,7 +342,7 @@ class ABSLearningEnv(gym.Env):
         self._audit_file = None
 
         # ─── LSTM training data export (27-col SAC-Data, OPTIONAL) ────
-        # DISABLED by default per Blake 2026-06-03: only ONE recorder may run,
+        # DISABLED by default only ONE recorder may run,
         # and it's the 99-col lstm2khz layer (RECORD_LSTM above). Flip
         # RECORD_SAC_DATA=True only if you explicitly want the old 27-col
         # v2-trainer format INSTEAD of (never alongside) the 99-col recorder.
@@ -392,14 +392,14 @@ class ABSLearningEnv(gym.Env):
         ext_dir.mkdir(parents=True, exist_ok=True)
         veh_dir.mkdir(parents=True, exist_ok=True)
         here = os.path.dirname(os.path.abspath(__file__))
-        # abstelemetry.lua — telemetry bridge (required)
+        # abstelemetry.lua, telemetry bridge (required)
         src_tel = os.path.join(here, "abstelemetry.lua")
         if os.path.exists(src_tel):
             shutil.copy2(src_tel, ext_dir / "abstelemetry.lua")
-        # lstm2khz.lua — 2kHz recorder (optional)
+        # lstm2khz.lua, 2kHz recorder (optional)
         if RECORD_LSTM and os.path.exists(LSTM_LUA_SRC):
             shutil.copy2(LSTM_LUA_SRC, ext_dir / "lstm2khz.lua")
-        # Machine-Trainer-Boy.pc — custom no-ABS car
+        # Machine-Trainer-Boy.pc, custom no-ABS car
         src_car = os.path.join(here, "Machine-Trainer-Boy.pc")
         if os.path.exists(src_car):
             shutil.copy2(src_car, veh_dir / "Machine-Trainer-Boy.pc")
@@ -407,7 +407,7 @@ class ABSLearningEnv(gym.Env):
 
     def _finish_lstm(self):
         """Stop the 2kHz recorder and move the CSV out of the .tech userdata dir.
-        Fully guarded — never raises into the training loop."""
+        Fully guarded, never raises into the training loop."""
         if not (RECORD_LSTM and getattr(self, '_lstm_recording', False)):
             return
         self._lstm_recording = False
@@ -465,7 +465,7 @@ class ABSLearningEnv(gym.Env):
         self.vehicle.control(throttle=0, steering=0, gear=0, parkingbrake=0, brake=0)
         self.vehicle.queue_lua_command("extensions.load('abstelemetry')")
         if RECORD_LSTM:
-            # teleport(reset=True) unloads vehicle extensions — reload the 2kHz
+            # teleport(reset=True) unloads vehicle extensions, reload the 2kHz
             # recorder beside abstelemetry (it gets verified at the arm point).
             self.vehicle.queue_lua_command("extensions.load('lstm2khz')")
         self.vehicle.queue_lua_command("extensions.abstelemetry.setBrakes(0,0,0,0)")
@@ -484,9 +484,9 @@ class ABSLearningEnv(gym.Env):
         # measure_target is the brake event START speed (state machine arms when
         # instSpeed crosses below this). Set well below target_ms so the state
         # machine reliably arms regardless of electrics.airspeed↔instSpeed lag
-        # (Mode 2 coast loop uses electrics.airspeed; lua state uses instSpeed —
+        # (Mode 2 coast loop uses electrics.airspeed; lua state uses instSpeed ,
         # the gap can be ~0.1-0.3 m/s, so 1.0 m/s margin gives clean headroom).
-        # avg_g calculation is unaffected — it's a property of deceleration, not
+        # avg_g calculation is unaffected, it's a property of deceleration, not
         # start speed (uniform decel: avg_g is identical from any start).
         measure_target = target_ms - 1.0  # ~2.2 mph below target
         self.vehicle.queue_lua_command("extensions.abstelemetry.resetAccum()")
@@ -516,11 +516,11 @@ class ABSLearningEnv(gym.Env):
 
         # --- Mode-specific handoff (still non-deterministic) ---
         if self._reset_mode == 1:
-            # Mode 1: Instant brake — throttle off, neutral, ML takes over
+            # Mode 1: Instant brake, throttle off, neutral, ML takes over
             self.vehicle.control(throttle=0.0, steering=0, gear=0)
 
         elif self._reset_mode == 2:
-            # Mode 2: Coast down — stay in gear, throttle off, wait for target speed
+            # Mode 2: Coast down, stay in gear, throttle off, wait for target speed
             self.vehicle.control(throttle=0.0, steering=0)  # still in gear
             coast_deadline = time.monotonic() + 10.0  # 10s wall-clock max
             while time.monotonic() < coast_deadline:
@@ -532,7 +532,7 @@ class ABSLearningEnv(gym.Env):
             self.vehicle.control(throttle=0.0, steering=0, gear=0)
 
         elif self._reset_mode == 3:
-            # Mode 3: Brake while throttle on — ML brakes now, throttle stays
+            # Mode 3: Brake while throttle on, ML brakes now, throttle stays
             self._mode3_throttle_countdown = 250  # 1 second at 250Hz
 
         # --- Flip BACK to deterministic, pause, hand off to ML at TRUE 200Hz ---
@@ -541,7 +541,7 @@ class ABSLearningEnv(gym.Env):
         self.bng.step(1)  # let one tick settle under determinism
 
         # --- LSTM 2kHz recording: arm capture of THIS braking event ---
-        # vlua sandbox writes a bare filename into the userdata dir; we move it out
+        # vlua sandbox writes a bare filename into the userdata dir; it gets moved out
         # at episode end. Wrapped so a recorder hiccup never kills training.
         self._lstm_recording = False
         if RECORD_LSTM:
@@ -551,7 +551,7 @@ class ABSLearningEnv(gym.Env):
                 chk = self.vehicle.queue_lua_command(
                     "return tostring(extensions.lstm2khz ~= nil)", response=True)
                 if str(chk).strip().lower() != 'true':
-                    print(f"{self._prefix} lstm2khz missing (got {chk!r}) — reloading...")
+                    print(f"{self._prefix} lstm2khz missing (got {chk!r}), reloading...")
                     self.vehicle.queue_lua_command("extensions.load('lstm2khz')")
                     self.bng.step(5)
                 self._lstm_ep += 1
@@ -560,7 +560,7 @@ class ABSLearningEnv(gym.Env):
                        ",safety_variant='no_abs'}")
                 # Direct call (NOT wrapped in "if extensions... then") so a missing
                 # extension errors loudly in the BeamNG log instead of silently
-                # no-opping — that silent guard is what hid the original failure.
+                # no-opping, that silent guard is what hid the original failure.
                 self.vehicle.queue_lua_command(
                     f"extensions.lstm2khz.startRecording('{self._lstm_fname}',{cfg})")
                 self._lstm_recording = True
@@ -579,7 +579,7 @@ class ABSLearningEnv(gym.Env):
         self.target_heading = self.start_heading
 
         # resetAccum + setTargetSpeed already called BEFORE throttle-up.
-        # Do NOT call resetAccum again — it would reset the brake state machine
+        # Do NOT call resetAccum again, it would reset the brake state machine
         # which Mode 2 may have already armed during coast-down.
         self.bng.step(2)
 
@@ -589,9 +589,9 @@ class ABSLearningEnv(gym.Env):
         return self._get_obs(), {}
 
     def step(self, action):
-        # v5.0 (revised): action ∈ [0,1] maps to brake ∈ [0.01, 1.0] — tiny 1%
+        # v5.0 (revised): action ∈ [0,1] maps to brake ∈ [0.01, 1.0], tiny 1%
         # floor so the lua brake-event state machine never resets mid-measurement.
-        # Lua threshold is 0.001 (v3.2), ours is 0.01 — comfortable safety margin.
+        # Lua threshold is 0.001 (v3.2), ours is 0.01, comfortable safety margin.
         # Model still has ~99% of full release range for real-ABS modulation.
         brakes = 0.01 + 0.99 * action[:4].astype(np.float64)
         # Speed-guesser action removed (Rule 2). predicted_speed retained as constant 0
@@ -628,7 +628,7 @@ class ABSLearningEnv(gym.Env):
             "return extensions.abstelemetry.readAll()", response=True))
 
         obs = self._build_obs_from_data(data)
-        # gps_speed not in obs — read from data dict for internal tracking
+        # gps_speed not in obs, read from data dict for internal tracking
         gps_speed = self._last_gps_speed  # set by _build_obs_from_data
         # NOTE: indices below are post-reorg (slip removed, brk_actual removed, heading_error removed).
         # gy_avg moved from obs[8] (22-dim) → obs[4] (27-dim). yaw_rate moved from obs[10] → obs[6].
@@ -645,7 +645,7 @@ class ABSLearningEnv(gym.Env):
         else:
             spd_error_pct = 0.0
         # speedup #3: per-step speed_prediction CSV write skipped (diagnostic-only,
-        # predicted_speed is hardcoded 0 since we removed the speed-guesser action).
+        # predicted_speed is hardcoded 0 since removal of the speed-guesser action).
         # If you ever need this back, uncomment:
         # self._spd_writer.writerow([
         #     self.episode_count, self.steps_taken,
@@ -654,7 +654,7 @@ class ABSLearningEnv(gym.Env):
         #     round(yaw_rate, 4), 1 if high_yaw else 0,
         # ])
 
-        # ─── LSTM data row (27-col SAC-Data — only when RECORD_SAC_DATA) ───
+        # ─── LSTM data row (27-col SAC-Data, only when RECORD_SAC_DATA) ───
         # Per-episode session_id so LSTM training respects brake-event boundaries.
         self._lstm_frame += 1
         if self._lstm_writer is not None:
@@ -713,10 +713,10 @@ class ABSLearningEnv(gym.Env):
         reward += step_g_rew
         self.ep_step_g_sum += step_g_rew
 
-        # heading_error still computed — grading-side use ONLY (crash terminal at >CRASH_HEADING).
+        # heading_error still computed, grading-side use ONLY (crash terminal at >CRASH_HEADING).
         self.current_heading = float(data.get('heading', self.current_heading))
         heading_error = abs(self.current_heading - self.target_heading)
-        self.prev_heading_error = heading_error  # legacy state — kept so existing refs don't break
+        self.prev_heading_error = heading_error  # legacy state, kept so existing refs don't break
 
         # ─── v5.0 YAW: target-driven (deviation from requested yaw rate) ──
         # All three signals (per-step bonus, cumulative, catastrophic backstop)
@@ -737,7 +737,7 @@ class ABSLearningEnv(gym.Env):
         self.ep_yaw_penalty += yaw_bonus  # field-name kept for CSV-compat; semantically the yaw signal
 
         # Cumulative tracking (for terminal bonus + catastrophic backstop)
-        self.ep_yaw_abs_sum += yaw_error * self._dt           # ∫|yaw_error|·dt — matches "perfect <0.1" metric
+        self.ep_yaw_abs_sum += yaw_error * self._dt           # ∫|yaw_error|·dt, matches "perfect <0.1" metric
         if yaw_error > YAW_RATE_DEADZONE_RAD_S:
             excess = yaw_error - YAW_RATE_DEADZONE_RAD_S
             self.ep_yaw_sq_sum += excess * excess * self._dt  # catastrophic backstop input (excess²·dt)
@@ -746,7 +746,7 @@ class ABSLearningEnv(gym.Env):
         yaw_pen = yaw_bonus
 
         # --- Audit log (per-step, non-terminal rows) ---
-        force_override = 0  # FORCE_BRAKE_THRESH removed — model handles all stopping
+        force_override = 0  # FORCE_BRAKE_THRESH removed, model handles all stopping
         self._audit_step_data = (obs, brakes, predicted_speed, gps_speed,
                                  braking_g_gs, force_override,
                                  step_g_rew, yaw_pen, spd_rew, reward)
@@ -806,7 +806,7 @@ class ABSLearningEnv(gym.Env):
         if self.stop_timer >= STOP_FRAMES:
             terminated = True
 
-            # Terminal: release brakes, step, read final stats (3 RT — runs once per episode)
+            # Terminal: release brakes, step, read final stats (3 RT, runs once per episode)
             self.vehicle.queue_lua_command(
                 "extensions.abstelemetry.setBrakes(0,0,0,0)")
             self.bng.step(5)
@@ -814,7 +814,7 @@ class ABSLearningEnv(gym.Env):
                 "return extensions.abstelemetry.readAll()", response=True))
 
             # v2.1: last_brake_avg_g is already in g's (BeamNG kinematic method).
-            # SAME stopping mechanics abstelemetry uses — do NOT self-compute distance.
+            # SAME stopping mechanics abstelemetry uses, do NOT self-compute distance.
             avg_g = float(term_data.get('last_brake_avg_g', 0.0))
             self.ep_stopping_dist = float(term_data.get('last_brake_dist', 0.0))
 
@@ -870,13 +870,13 @@ class ABSLearningEnv(gym.Env):
 
     def _clip_obs(self, raw):
         """Replace NaN/inf with safe values, then clip each dim to its declared bound.
-        Defensive layer — protects PPO from sensor faults that could poison policy weights."""
+        Defensive layer, protects PPO from sensor faults that could poison policy weights."""
         safe = np.nan_to_num(raw, nan=0.0, posinf=1e6, neginf=-1e6)
         return np.clip(safe, self._OBS_LOW, self._OBS_HIGH).astype(np.float32)
 
     def _get_obs(self):
         """Initial obs via sensors.poll (used in reset only).
-        v2.1: tel_gy_inst is 60Hz stale — fine for initial obs, step() uses gy_avg."""
+        v2.1: tel_gy_inst is 60Hz stale, fine for initial obs, step() uses gy_avg."""
         self.vehicle.sensors.poll()
         e = self.vehicle.sensors['electrics']
 
@@ -904,7 +904,7 @@ class ABSLearningEnv(gym.Env):
 
         self._last_gps_speed = gps_speed
 
-        # Slip channels removed from obs (cheat — derived from ground-truth airspeed).
+        # Slip channels removed from obs (cheat, derived from ground-truth airspeed).
         # slip_fr/fl/rr/rl still computed above for reward grading via _last_slip_vals.
         self._last_slip_vals = np.array([slip_fr, slip_fl, slip_rr, slip_rl], dtype=np.float32)
         raw = np.array([
@@ -913,7 +913,7 @@ class ABSLearningEnv(gym.Env):
             self.prev_brakes[0], self.prev_brakes[1],    # 7-10: prev brake cmds
             self.prev_brakes[2], self.prev_brakes[3],
             # brk_actual_* DROPPED 2026-05-02 (physics cheat, redundant w/ prev_brakes)
-            0.0, 0.0,                                    # 11-12: gy_min, gy_max — no poll data yet at reset
+            0.0, 0.0,                                    # 11-12: gy_min, gy_max, no poll data yet at reset
             0.0,                                         # 13: rpm (none at reset)
             0.0,                                         # 14: gear (none at reset)
             0.0,                                         # 15: steering (none at reset)
@@ -958,7 +958,7 @@ class ABSLearningEnv(gym.Env):
         brk_rr = float(data.get('brk_actual_rr', 0.0))
         brk_rl = float(data.get('brk_actual_rl', 0.0))
 
-        # gps_speed intentionally excluded — model must infer speed from wheel/g data
+        # gps_speed intentionally excluded, model must infer speed from wheel/g data
         self._last_gps_speed = gps_speed  # still tracked internally for stop detection
 
         # New real-car sensors added 2026-05-02 (Rule 1 compliant, all standard CAN/IMU outputs)
@@ -973,7 +973,7 @@ class ABSLearningEnv(gym.Env):
         # 3rd IMU axis + derivative-rate features added 2026-05-02
         gz = float(data.get('gz_inst', 0.0))             # vertical accel (m/s², raw, includes gravity)
 
-        # Derivatives (rates) — computed as (current - prev) / dt. dt fixed at 1/250s.
+        # Derivatives (rates), computed as (current - prev) / dt. dt fixed at 1/250s.
         # First step after reset has no prev → emit 0.
         cur_ws = np.array([ws_fr, ws_fl, ws_rr, ws_rl], dtype=np.float32)
         if self._has_prev_state:
@@ -989,7 +989,7 @@ class ABSLearningEnv(gym.Env):
         self._prev_roll = roll
         self._has_prev_state = True
 
-        # Slip channels removed from obs (cheat — derived from ground-truth airspeed).
+        # Slip channels removed from obs (cheat, derived from ground-truth airspeed).
         # slip_fr/fl/rr/rl still computed above for reward grading via _last_slip_vals.
         self._last_slip_vals = np.array([slip_fr, slip_fl, slip_rr, slip_rl], dtype=np.float32)
         raw = np.array([
@@ -1027,7 +1027,7 @@ class ABSLearningEnv(gym.Env):
         self._audit_writer.writerow([
             # --- WHO ---
             'env', 'episode', 'step', 'target_mph',
-            # --- WHAT THE MODEL SEES (27 obs — brk_actual_* dropped: physics cheat) ---
+            # --- WHAT THE MODEL SEES (27 obs, brk_actual_* dropped: physics cheat) ---
             'see_ws_fr', 'see_ws_fl', 'see_ws_rr', 'see_ws_rl',
             'see_gy_avg', 'see_lateral_g', 'see_yaw',
             'see_prev_brk_fr', 'see_prev_brk_fl', 'see_prev_brk_rr', 'see_prev_brk_rl',
@@ -1036,7 +1036,7 @@ class ABSLearningEnv(gym.Env):
             'see_input_brake', 'see_input_throttle',
             'see_gz', 'see_pitch_rate', 'see_roll_rate',
             'see_wa_fr', 'see_wa_fl', 'see_wa_rr', 'see_wa_rl',
-            # --- WHAT THE MODEL DOES (4 actions — speed-guesser removed) ---
+            # --- WHAT THE MODEL DOES (4 actions, speed-guesser removed) ---
             'do_brake_fr', 'do_brake_fl', 'do_brake_rr', 'do_brake_rl',
             # --- WHAT ACTUALLY HAPPENED ---
             'actual_speed_ms', 'actual_speed_mph', 'predicted_speed_ms',
@@ -1130,7 +1130,7 @@ class ABSLearningEnv(gym.Env):
         try:
             import psutil
         except ImportError:
-            print(f"{self._prefix} psutil missing — skipping perf tuning (pip install psutil)")
+            print(f"{self._prefix} psutil missing, skipping perf tuning (pip install psutil)")
             return
 
         # --- Python: priority + affinity ---

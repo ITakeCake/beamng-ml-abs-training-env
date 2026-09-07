@@ -2,7 +2,7 @@
 
 Written for someone who has not read a reinforcement-learning paper. Each entry
 says what the knob does in plain terms, what happens if it is too high or too
-low, and -- where there is one -- the concrete symptom to watch for in this
+low, and, where there is one, the concrete symptom to watch for in this
 project. Jargon is spelled out on first use rather than assumed; a label like
 "tau" or "GAE lambda" tells a reader nothing on its own, which is exactly why
 these exist.
@@ -32,14 +32,14 @@ RUN_HELP = {
         "picks one at random each attempt, which makes the controller work at\n"
         "any speed instead of memorising one.\n\n"
         "Every speed you list needs its own measured baseline before you can\n"
-        "use the normalized reward -- press 'Calibrate baselines' first."
+        "use the normalized reward, press 'Calibrate baselines' first."
     ),
     "pedal_random": (
         "Vary how hard the driver presses the brake pedal, ONE value per\n"
         "attempt.\n\n"
         "Off: the pedal is mashed to the floor (100%) every time.\n"
         "On:  each attempt picks a random amount from the range and HOLDS it\n"
-        "     for that whole stop -- 62% this time, 87% the next. The pedal\n"
+        "     for that whole stop, 62% this time, 87% the next. The pedal\n"
         "     does not move during a stop.\n\n"
         "Real drivers do not always slam the pedal, so this teaches the\n"
         "controller to work from a half-pressed pedal as well as a floored\n"
@@ -51,15 +51,15 @@ RUN_HELP = {
     "pedal_spec": (
         "Which pedal positions to draw from. One is picked per attempt and\n"
         "held for the whole stop.\n\n"
-        "0.5-1.0       a range -- every 0.01 step between them (51 levels)\n"
-        "0.5,0.75,1.0  a list -- only these\n"
+        "0.5-1.0       a range, every 0.01 step between them (51 levels)\n"
+        "0.5,0.75,1.0  a list, only these\n"
         "0.6           one fixed level\n\n"
         "Values snap to 2 decimals, because each distinct level needs its own\n"
         "measured baseline before the normalized reward can score it.\n\n"
         "With 'Fast calibration' on, the whole 0.5-1.0 range is about 20\n"
         "minutes; stepped it is nearer three hours. A list is still cheaper\n"
         "when you do not need the resolution.\n\n"
-        "Press 'Calibrate baselines' after setting this -- it measures exactly\n"
+        "Press 'Calibrate baselines' after setting this, it measures exactly\n"
         "the levels this implies."
     ),
     "grip": (
@@ -71,7 +71,7 @@ RUN_HELP = {
         "Grip changes at the exact moment braking starts, so the car always\n"
         "reaches its target speed normally first.\n\n"
         "The normalized reward needs a measured baseline per grip level, so\n"
-        "use a LIST of levels (not a range) if you are using it -- a range can\n"
+        "use a LIST of levels (not a range) if you are using it, a range can\n"
         "produce a value nothing was measured at."
     ),
     "corner": (
@@ -82,12 +82,12 @@ RUN_HELP = {
         "Bigger number = gentler curve. Too tight and the car cannot hold the\n"
         "turn at all: at 60 mph this car tops out around 64 m, and even that\n"
         "uses all the grip, leaving none for braking. 150 m is a sensible\n"
-        "test -- it uses about half the grip.\n\n"
+        "test, it uses about half the grip.\n\n"
         "Needs 'Calibrate baselines' run first: the tool has to measure what\n"
         "steering angle actually holds that curve."
     ),
     "reward": (
-        "How the controller is scored -- what it is trying to get better at.\n\n"
+        "How the controller is scored, what it is trying to get better at.\n\n"
         "v9.0       = the dense term IS the metric: -1 point per metre\n"
         "             travelled, every step, so the episode sum is exactly\n"
         "             minus the stopping distance. Nothing is measured with\n"
@@ -135,7 +135,7 @@ RUN_HELP = {
         "How long to train, counted in physics steps (200 per second).\n\n"
         "500,000 is roughly a night's run and about 450 braking attempts.\n"
         "Below ~50,000 the controller has barely started learning.\n\n"
-        "You can stop early at any point with GRACEFUL STOP -- the model is\n"
+        "You can stop early at any point with GRACEFUL STOP, the model is\n"
         "saved on the way out, so a long number is not a commitment."
     ),
     "resume": (
@@ -158,7 +158,7 @@ RUN_HELP = {
         "same number of decisions.\n\n"
         "OFF (experimental): the engine free-runs and the policy reads state\n"
         "whenever it can. Measured on PPO-05, stepping cost 62 ms of real time\n"
-        "for every 5 ms of simulation -- about 1/14th real time, nearly all of\n"
+        "for every 5 ms of simulation, about 1/14th real time, nearly all of\n"
         "it spent waiting on network round trips rather than on physics.\n\n"
         "What stays true: the brake result. Onset and distance are measured in\n"
         "Lua at 2 kHz, which does not care how fast Python keeps up.\n\n"
@@ -170,7 +170,7 @@ RUN_HELP = {
     "train_speed_factor": (
         "How much faster than real time to run physics while free-running.\n\n"
         "Only does anything when 'Deterministic training' is OFF. While\n"
-        "stepping, physics is paused between decisions -- there is no clock\n"
+        "stepping, physics is paused between decisions, there is no clock\n"
         "running for a multiplier to act on.\n\n"
         "Higher is not simply better. Round trips cost what they cost, so at\n"
         "10x the policy gets roughly a tenth as many decisions per stop as it\n"
@@ -187,7 +187,7 @@ RUN_HELP = {
         "   deterministic 1.0135      live 4x  1.0214\n"
         "   live 10x      1.0091      live 25x 1.0066\n\n"
         "All within 0.8%, which is smaller than any single regime's own\n"
-        "run-to-run spread (~0.02) -- so they are indistinguishable there.\n\n"
+        "run-to-run spread (~0.02), so they are indistinguishable there.\n\n"
         "That was ONE configuration though, not a proof for all of them, so\n"
         "every row records how it was measured and you are warned before\n"
         "mixing regimes in one table.\n\n"
@@ -202,14 +202,14 @@ RUN_HELP = {
         "Only used when 'Fast calibration' is ticked."
     ),
     "net_arch": (
-        "The size of the controller's 'brain' -- how many layers of how many\n"
+        "The size of the controller's 'brain', how many layers of how many\n"
         "units.\n\n"
         "3x256 = three layers of 256 units (the default, and what every\n"
         "        result in this project so far used)\n"
         "22x128 = twenty-two layers of 128\n"
         "512,256,128 = three layers of decreasing width\n\n"
         "Bigger is not better here. Braking is a fairly simple reaction --\n"
-        "wheel speeds in, brake pressure out -- so a deep network mostly adds\n"
+        "wheel speeds in, brake pressure out, so a deep network mostly adds\n"
         "training time and a slower controller, without learning anything the\n"
         "small one could not.\n\n"
         "There is a hard reason to stay modest: the trained network is\n"
@@ -234,7 +234,7 @@ _LR = (
     "lesson.\n\n"
     "Too high and it over-reacts to a single lucky or unlucky stop and never\n"
     "settles. Too low and it improves so slowly the run finishes first.\n\n"
-    "0.0001 is the tuned value for this project -- it was lowered from 0.0003\n"
+    "0.0001 is the tuned value for this project, it was lowered from 0.0003\n"
     "because the higher value made the car crash often after resuming a run.\n"
     "Leave it alone unless you have a reason."
 )
@@ -243,7 +243,7 @@ SAC_HELP = {
     "lr": _LR,
     "buffer_size": (
         "How many past braking attempts to keep in memory and re-learn from.\n\n"
-        "SAC does not just learn from the stop it has just done -- it keeps a\n"
+        "SAC does not just learn from the stop it has just done, it keeps a\n"
         "library of old ones and revisits them, which is why it needs far\n"
         "fewer real attempts than PPO.\n\n"
         "Bigger remembers more but uses more RAM. 100,000 steps is about 90\n"
@@ -261,8 +261,8 @@ SAC_HELP = {
     "target_entropy": (
         "How much random experimentation to keep doing.\n\n"
         "Entropy here just means randomness. Without it the controller settles\n"
-        "on the first thing that half-works -- for this project that is\n"
-        "'stand on the brakes and lock the wheels' -- and never discovers\n"
+        "on the first thing that half-works, for this project that is\n"
+        "'stand on the brakes and lock the wheels', and never discovers\n"
         "anything better.\n\n"
         "More negative = less experimenting, more sticking to what it knows.\n"
         "-2.0 matches the number of things it controls (front and rear)."
@@ -300,7 +300,7 @@ PPO_HELP = {
         "How many times to re-read the same batch of experience before\n"
         "throwing it away.\n\n"
         "More squeezes more out of each attempt, which is valuable when\n"
-        "attempts are expensive -- but too many and it over-fits to that\n"
+        "attempts are expensive, but too many and it over-fits to that\n"
         "batch and forgets how to generalise. 10 is standard."
     ),
     "clip_range": (
@@ -364,7 +364,7 @@ PPO_HELP = {
 
 def help_for(algo, key):
     """Tooltip text for one field, or None when there is nothing written for
-    it -- callers must treat a missing entry as 'no tooltip', never an error."""
+    it, callers must treat a missing entry as 'no tooltip', never an error."""
     if key in RUN_HELP:
         return RUN_HELP[key]
     table = SAC_HELP if algo == "sac" else PPO_HELP
@@ -372,7 +372,7 @@ def help_for(algo, key):
 
 
 class Tooltip:
-    """Hover help for a widget. Plain tkinter -- no ttk tooltip exists.
+    """Hover help for a widget. Plain tkinter, no ttk tooltip exists.
 
     Shows after a short delay so sweeping the mouse across the form does not
     flash popups, and hides on leave, click, or when the widget goes away.

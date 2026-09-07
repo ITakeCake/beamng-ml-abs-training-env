@@ -1,5 +1,5 @@
 """
-export_policy_weights.py — rebuild of the lost June exporter (export_mlabs.py),
+export_policy_weights.py, rebuild of the lost June exporter (export_mlabs.py),
 extended for PPO. Emits mtb_ml_weights.lua-format string-blob modules for the
 MTB-ML-ABS.lua in-controller NN, and runs an OFFLINE PARITY CHECK by re-parsing
 the emitted Lua text and comparing against the SB3 policy on random obs.
@@ -7,7 +7,7 @@ the emitted Lua text and comparing against the SB3 policy on random obs.
 Format (reverse-engineered from the deployed mtb_ml_weights.lua):
   M.obs_dim / M.act_dim / M.clip_obs / M.eps
   M.obs_mean_s / M.obs_var_s        VecNormalize stats over the FULL STACKED obs
-  M.layers = { {rows,cols, act="relu"|nil, b_s=[==[...]==], W_s=[==[...]==]}, ... }
+  M.layers = { {rows,cols, act="relu"|nil, b_s=[==[...]==], W_s=[==[...]==]}... }
   W row-major: (r,c) at flat (r-1)*cols+c.  Floats %.9g space-separated.
 NEW (PPO): M.head also supports ``ppo_tanh_release01`` for the bounded
 two-axle release policy. ``M.interface`` and ``M.control_hz`` tell the Lua
@@ -41,7 +41,7 @@ def load_vecnorm(path):
 
 
 def extract_layers(ckpt, algo):
-    """Return [(W, b, act), ...] ending with the action head (act=None)."""
+    """Return [(W, b, act)...] ending with the action head (act=None)."""
     if algo == "ppo":
         from stable_baselines3 import PPO
         model = PPO.load(ckpt, device="cpu")
@@ -224,7 +224,7 @@ def main():
     if worst < 1e-5:
         print("PASS")
     else:
-        raise SystemExit("FAIL -- parity mismatch; refusing deployment")
+        raise SystemExit("FAIL, parity mismatch; refusing deployment")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """Pure geometry/bookkeeping for braking-in-a-turn. NO game imports.
 
 Scope (PLAN_V2 section 4): ONE constant-radius corner. The reward is not
-rewritten -- v5.0 already grades yaw as `|yaw_rate - target_yaw_rate|`, so a
+rewritten, v5.0 already grades yaw as `|yaw_rate - target_yaw_rate|`, so a
 corner is a *target* change. Two things have to move:
 
   1. `target_yaw_rate = +-v/R`, recomputed EVERY step from the current speed.
@@ -9,19 +9,19 @@ corner is a *target* change. Two things have to move:
      from a car that is slowing to a stop.
   2. The crash rule (90 deg heading deviation) has to measure deviation from
      the ARC's tangent at the car's current position along the arc, not from
-     the heading it entered with -- a correctly driven corner legitimately
+     the heading it entered with, a correctly driven corner legitimately
      rotates the car most of the way to 90 deg.
 
 The tangent heading is just the integral of the target yaw rate:
 `dtheta = v*dt/R = ds/R`, i.e. heading change per unit arc length. Integrating
 `target_yaw_rate` with the car's ACTUAL speed therefore tracks the tangent at
-the arc position the car has actually reached -- no separate path tracking, and
+the arc position the car has actually reached, no separate path tracking, and
 a car that stops early simply stops rotating the target too.
 
 Steering: open loop, one fixed angle held through the stop. A closed-loop arc
 follower would react differently to each car's behaviour, which would turn
 "stock ABS's advantage in a corner" into "the steering controller's reaction to
-stock ABS" -- the calibration only means something if slam, stock and the model
+stock ABS", the calibration only means something if slam, stock and the model
 all drive the identical procedure. The angle that yields a given radius is not
 known a priori (wheelbase, understeer, grip), so it is SOUGHT once per
 (car, speed, grip, radius) and cached: hold an angle, measure the steady-state
@@ -45,7 +45,7 @@ RIGHT = -1
 # raw obj:getDirection() radians, which wrap at +-pi. Straight-line episodes never
 # noticed because the target never moved. A corner rotates the target up to ~90
 # deg, so an episode that starts near +-pi would cross the branch cut mid-stop and
-# the parent would read a ~2pi error -- an instant, entirely fictional CRASH.
+# the parent would read a ~2pi error, an instant, entirely fictional CRASH.
 HEADING_BRANCH_MARGIN = 0.20  # rad of clearance demanded from +-pi
 
 
@@ -103,7 +103,7 @@ class HeadingTracker:
     knows the true signed error) exactly right.
 
     A straight-line episode leaves the target at the start heading, i.e. the
-    tracker returns `start_heading` forever -- byte-identical to today."""
+    tracker returns `start_heading` forever, byte-identical to today."""
 
     def __init__(self, start_heading):
         self.start_heading = float(start_heading)
@@ -138,7 +138,7 @@ class HeadingTracker:
 
 class CornerSpec:
     """One constant-radius corner. `steering` is the open-loop normalized wheel
-    input that was measured to hold `radius_m` -- None until a seek has run, and
+    input that was measured to hold `radius_m`, None until a seek has run, and
     training refuses to start without it rather than guessing an angle."""
 
     def __init__(self, radius_m, direction=LEFT, steering=None):
@@ -153,7 +153,7 @@ class CornerSpec:
     def signed_steering(self):
         if self.steering is None:
             raise ValueError(
-                f"no steering angle known for radius {self.radius_m} m -- run the "
+                f"no steering angle known for radius {self.radius_m} m, run the "
                 "steering seek (reference runner) before training this corner")
         return self.direction * abs(self.steering)
 
@@ -172,7 +172,7 @@ class CornerSpec:
 
 
 def parse_corner_spec(text):
-    """None = straight (no corner at all -- the v5.0 behaviour). Otherwise
+    """None = straight (no corner at all, the v5.0 behaviour). Otherwise
     "50", "50L", "50R" (metres, L default)."""
     t = str(text).strip().lower()
     if t in ("", "off", "none", "straight"):
@@ -206,7 +206,7 @@ def lateral_g_for_radius(speed_ms, radius_m):
 
 
 def seek_is_saturated(history, tol=0.02):
-    """True when more steering has stopped buying radius -- the car is
+    """True when more steering has stopped buying radius, the car is
     understeering at its lateral limit, so the target is unreachable however
     far the wheel is turned. Detected rather than waited out: the remaining
     probes cost minutes and cannot succeed, and the smallest radius reached so
@@ -223,13 +223,13 @@ def steering_seek_update(steering, measured_radius, target_radius,
                          gain=STEERING_SEEK_GAIN):
     """Next angle to try. Radius falls as steering rises, so an angle that came
     out too wide needs to grow by the radius ratio. Damped by `gain` because
-    understeer makes the relationship superlinear near the grip limit -- an
+    understeer makes the relationship superlinear near the grip limit, an
     undamped step overshoots into a slide and measures nothing useful."""
     s = abs(float(steering))
     if s <= 0.0:
         raise ValueError("steering seek needs a non-zero starting angle")
     if not measured_radius or measured_radius <= 0.0:
-        raise ValueError("no measured radius (car was not yawing) -- "
+        raise ValueError("no measured radius (car was not yawing), "
                          "increase the starting angle")
     ratio = float(measured_radius) / float(target_radius)
     nxt = s * (1.0 + gain * (ratio - 1.0))
@@ -244,7 +244,7 @@ def steering_seek_converged(measured_radius, target_radius, tol=STEERING_SEEK_TO
 
 def initial_steering_guess(radius_m, wheelbase_m=2.8, steering_lock_rad=0.52):
     """Ackermann first guess: road-wheel angle ~ wheelbase / R, expressed as a
-    fraction of full lock. Only a seed for the seek -- understeer means the real
+    fraction of full lock. Only a seed for the seek, understeer means the real
     angle is always larger, which is why the seek exists."""
     angle = float(wheelbase_m) / float(radius_m)
     return min(STEERING_MAX, max(1e-3, angle / float(steering_lock_rad)))

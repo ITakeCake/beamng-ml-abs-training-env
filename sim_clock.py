@@ -3,7 +3,7 @@
 Deterministic training advances physics one 5 ms tick per `bng.step(1)`, and
 every one of those costs a TCP round trip. Measured on PPO-05: 62 ms of wall
 clock to buy 5 ms of simulation, i.e. 1/14th of real time, with the CPU idle
-between handshakes. The engine is not the bottleneck -- the handshakes are.
+between handshakes. The engine is not the bottleneck, the handshakes are.
 
 The alternative is to stop stepping: let the engine free-run under
 `be:setPhysicsSpeedFactor(N)` and have Python read state whenever it can. The
@@ -15,7 +15,7 @@ WHAT THIS TRADES
 Deterministic: one policy decision per 5 ms of sim, exactly, forever.
 Free-running:  one policy decision per round trip, whatever that costs today.
 
-So the policy's effective decision rate falls as the speed factor rises -- at
+So the policy's effective decision rate falls as the speed factor rises, at
 N=10 a six-second stop yields tens of decisions rather than ~1100. Episodes per
 hour go up; decisions per episode go down. Which of those matters more is an
 empirical question about this task, which is the point of putting it behind a
@@ -65,7 +65,7 @@ class _SettingsProxy:
 
     The parent calls set_deterministic(DETERM_HZ) to enter the braking phase.
     Honouring that would undo the whole point, so it becomes "apply the speed
-    factor" instead -- the same transition (accel is over, measurement begins)
+    factor" instead, the same transition (accel is over, measurement begins)
     expressed the way free-running mode expresses it.
     """
 
@@ -105,7 +105,7 @@ class FreeRunClock:
         self.sim_seconds = 0.0
         self.step_calls = 0
 
-    # -- the speed factor lives on the GameEngine Lua VM, where be: exists ----
+    #, the speed factor lives on the GameEngine Lua VM, where be: exists ----
     def apply_speed_factor(self):
         self._bng.control.queue_lua_command(
             f"be:setPhysicsSpeedFactor({self.speed_factor:g})")
@@ -125,7 +125,7 @@ class FreeRunClock:
         The sleep is a floor, not a guarantee: a round trip elsewhere in the
         caller's loop usually costs more than this, and at high speed factors
         the requested wait falls below the OS timer granularity. That is fine
-        -- the engine is running either way, and the caller's own latency is
+      , the engine is running either way, and the caller's own latency is
         what actually paces the loop.
         """
         sim_s = float(count) / DETERM_HZ
@@ -152,7 +152,7 @@ def wrap(bng, deterministic=True, speed_factor=1.0):
 # ---------------------------------------------------------------------------
 # It looks like free speed and is not. BeamNG services beamngpy from
 # onPreRender (techCore.lua:521) and step(N) decrements blocking.data once per
-# RENDERED FRAME (line 559) -- not per physics tick. With the limiter on, one
+# RENDERED FRAME (line 559), not per physics tick. With the limiter on, one
 # frame happens to carry exactly one tick, which is what makes deterministic
 # stepping mean anything. Uncapped, frames outrun physics and step(1) returns on
 # a frame where physics may not have ticked at all.
@@ -168,7 +168,7 @@ def wrap(bng, deterministic=True, speed_factor=1.0):
 #                 VERDICT FAIL
 #
 # The apparent 45x (step(1) 31.14ms -> 0.69ms) was step() returning without
-# doing the work, and PPO-12's 259 steps/s was the same illusion -- which is
+# doing the work, and PPO-12's 259 steps/s was the same illusion, which is
 # exactly why every one of its episodes timed out with dist=0.0.
 #
 # Keep this function so the experiment is reproducible and nobody re-derives it
@@ -243,7 +243,7 @@ def measure_step_ms(bng, reps=15):
 # settings.json while the game is closed was measured to change nothing, so the
 # running process does not take the file's word for it.
 #
-# fpsLimitBackgroundEnabled matters as much as the main flag -- a headless
+# fpsLimitBackgroundEnabled matters as much as the main flag, a headless
 # instance has no focused window, so it is a background window by any usual
 # test, and that limiter defaults to 5 FPS.
 FPS_UNCAP_LUA = (
@@ -258,7 +258,7 @@ def uncap_frame_rate(bng, verify=True):
 
     Uses queue_lua_command(response=True), which blocks for the engine's reply,
     rather than the fire-and-forget form. That distinction is not cosmetic: the
-    async form created a real race -- the env measured step(1) at 13.35 ms and
+    async form created a real race, the env measured step(1) at 13.35 ms and
     logged STILL CAPPED while the command had only been queued, and the same
     run then reached 259 steps/s. An acknowledged call cannot report on a
     setting that has not been applied yet.

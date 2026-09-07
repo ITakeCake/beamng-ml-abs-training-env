@@ -1,5 +1,5 @@
 """compat.py checks the installed beamngpy against BeamNGpy's own published
-compatibility table (BeamNGpy/COMPATIBILITY.md, fetched 2026-08-29) -- no game
+compatibility table (BeamNGpy/COMPATIBILITY.md, fetched 2026-08-29), no game
 imports needed."""
 import os
 import sys

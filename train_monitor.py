@@ -255,7 +255,7 @@ def _csv_path(target, episode_filename="episode_log_env0.csv"):
 
     The per-run copy is a mirror of logs/episode_log_env0.csv, so a run whose
     name was reused has a short file while the master mirror still holds the
-    full history -- being able to point at either is what makes a demo of a
+    full history, being able to point at either is what makes a demo of a
     long run possible after that has happened."""
     if os.path.isfile(target):
         return target

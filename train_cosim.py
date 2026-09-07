@@ -1,10 +1,10 @@
 """PPO trainer for the co-sim straight-line ABS env (v1).
 
-GUI-facing entrypoint. The GUI never imports this -- it writes a config.json,
+GUI-facing entrypoint. The GUI never imports this, it writes a config.json,
 spawns `python train_cosim.py --config <path>`, tails train.log / episode_log.csv,
 and drops the stop file to end a run gracefully. See docs/GUI_CONTRACT.md.
 
-Graceful stop only -- a hard kill (taskkill) can corrupt PPO's optimizer state.
+Graceful stop only, a hard kill (taskkill) can corrupt PPO's optimizer state.
 """
 import argparse
 import atexit
@@ -664,7 +664,7 @@ def main():
             model = PPO.load(resume["checkpoint"], env=venv, device=device)
             # PPO.load takes its hyperparameters from the SAVED model, so a
             # checkpoint built elsewhere (a distilled one, say) silently imposes
-            # whatever it was constructed with -- SB3 defaults of lr 3e-4,
+            # whatever it was constructed with, SB3 defaults of lr 3e-4,
             # gamma 0.99, lambda 0.95, no target_kl. Every resume before this
             # ran at 30x the configured learning rate while the log claimed
             # otherwise. Apply the run's configuration explicitly.
@@ -721,7 +721,7 @@ def main():
 
             PPO trains between rollouts while BeamNG keeps transmitting, so the
             update's ~17 ms (much more with big batches) arrives as a backlog
-            that the next steps would consume as live telemetry -- mid-episode,
+            that the next steps would consume as live telemetry, mid-episode,
             where reset's drain cannot help.
             """
 

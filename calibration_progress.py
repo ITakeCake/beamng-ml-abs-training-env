@@ -1,7 +1,7 @@
 """Progress and time-remaining for a calibration run, derived from its log.
 
 The runner already prints one line per completed stop and one per finished row,
-so nothing about the measurement needs to change to report progress -- this
+so nothing about the measurement needs to change to report progress, this
 parses what is already there. Keeping it a pure function of (log text, planned
 matrix) means the estimate is testable without a game, which matters because a
 wrong "2 minutes left" that sits at 2 minutes for an hour is worse than no
@@ -14,13 +14,13 @@ fixed seconds-per-stop would be wrong in every one of those cases.
 """
 import re
 
-# "slam @ 60 mph: arc_g=1.0197 arc_dist=33.28m ..." — one per completed stop.
+# "slam @ 60 mph: arc_g=1.0197 arc_dist=33.28m ...", one per completed stop.
 STOP_RE = re.compile(
     r"^(\d\d:\d\d:\d\d)\.\d+\s+INFO\s+\[refrun\]\s+(slam|stock)\s+@\s+(\d+)\s+mph"
     r"(?:\s+\[live x[\d.]+\])?:", re.M)
-# "calibrated slam grip=...|speed=...|radius=...: {...}" — one per finished row.
+# "calibrated slam grip=...|speed=...|radius=...: {...}", one per finished row.
 ROW_RE = re.compile(r"\[refrun\]\s+calibrated\s+(slam|stock)\s+(\S+):", re.M)
-# "probe steering=+0.1077 -> ..." — corner seeks, which precede measurement.
+# "probe steering=+0.1077 -> ...", corner seeks, which precede measurement.
 PROBE_RE = re.compile(r"\[refrun\]\s+probe steering=", re.M)
 SEEK_DONE_RE = re.compile(r"\[refrun\]\s+steering seek converged", re.M)
 WROTE_RE = re.compile(r"\[refrun\]\s+wrote\s+(\S+)", re.M)
@@ -55,7 +55,7 @@ def parse_progress(log_text, total_stops=None, whole_file=False):
     """What the log says so far. `total_stops` from planned_stops(); without it
     the fraction and ETA are unknown but counts still work.
 
-    Only the current run is considered unless `whole_file` -- calibration.log is
+    Only the current run is considered unless `whole_file`, calibration.log is
     appended across runs, so an earlier failure would otherwise be reported as
     this run's."""
     if not whole_file:
@@ -125,17 +125,17 @@ def describe(progress):
         kind, msg = progress["failed"]
         return f"FAILED ({kind}): {msg[:80]}"
     if progress.get("finished"):
-        return f"done -- {progress['stops_done']} stops measured"
+        return f"done, {progress['stops_done']} stops measured"
     if progress.get("seeking"):
         return (f"seeking the steering angle for the corner "
-                f"(probe {progress['probes']}) -- no stops measured yet")
+                f"(probe {progress['probes']}), no stops measured yet")
     total = progress.get("total_stops")
     done = progress["stops_done"]
     if not done:
         return "starting BeamNG..."
     where = f" ({progress['last_stop']})" if progress.get("last_stop") else ""
     if total:
-        return (f"stop {done} of {total}{where} -- "
+        return (f"stop {done} of {total}{where}, "
                 f"{format_eta(progress['eta_seconds'])} left")
     return f"{done} stops measured{where}"
 

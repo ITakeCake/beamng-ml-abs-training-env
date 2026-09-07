@@ -1,6 +1,6 @@
 """Progress/ETA for a calibration run, parsed from the log the runner already
-writes. A wrong estimate is worse than none -- "2 minutes left" that sits at 2
-minutes for an hour destroys trust in the whole readout -- so the parsing is
+writes. A wrong estimate is worse than none, "2 minutes left" that sits at 2
+minutes for an hour destroys trust in the whole readout, so the parsing is
 pure and tested against real log text."""
 import os
 import sys
@@ -20,7 +20,7 @@ REAL = """\
 
 
 def test_planned_stops_counts_both_references_for_every_configuration():
-    """Two anchors per config -- without the slam car there is no floor."""
+    """Two anchors per config, without the slam car there is no floor."""
     assert cp.planned_stops([60], [1.0], [1.0], 3) == 6
     assert cp.planned_stops([60, 120], [1.0], [0.6, 0.8, 1.0], 3) == 36
 

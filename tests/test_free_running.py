@@ -35,7 +35,7 @@ def test_silencing_keeps_real_problems_visible():
 
 
 def test_the_trainers_own_logging_is_untouched():
-    """Only the named beamngpy loggers are raised -- silencing the root would
+    """Only the named beamngpy loggers are raised, silencing the root would
     take the episode lines with it."""
     import residual_log
     residual_log.quiet_beamngpy()
@@ -99,7 +99,7 @@ def test_the_uncap_uses_an_acknowledged_call_not_a_sleep():
 
 
 def test_the_uncap_returns_what_the_engine_reports():
-    """Not what was requested -- what the engine says is true afterwards."""
+    """Not what was requested, what the engine says is true afterwards."""
     import sim_clock
 
     class _Ack(_FakeBng):
@@ -115,7 +115,7 @@ def test_the_uncap_returns_what_the_engine_reports():
 
 
 def test_the_step_check_reports_milliseconds():
-    """Measuring beats reading the setting back -- the read-back log line never
+    """Measuring beats reading the setting back, the read-back log line never
     surfaced in the running instance's log."""
     import sim_clock
     ms = sim_clock.measure_step_ms(_FakeBng(), reps=5)
@@ -133,7 +133,7 @@ def test_free_running_never_steps_the_simulation():
 
 def test_step_accounts_the_sim_time_it_was_asked_for():
     """The parent's step counts still describe intended sim time even though
-    nothing steps -- that is what makes the episode's timing legible."""
+    nothing steps, that is what makes the episode's timing legible."""
     import sim_clock
     clock = sim_clock.FreeRunClock(_FakeBng(), speed_factor=1000)
     clock.step(200)                       # 200 ticks @200Hz == 1.0 s of sim
@@ -176,7 +176,7 @@ def test_the_factor_comes_off_for_the_acceleration_run_up():
 
 def test_pausing_is_dropped_while_free_running():
     """A pause would stop the world while step() sleeps against a clock that is
-    no longer running -- the episode would simply hang."""
+    no longer running, the episode would simply hang."""
     import sim_clock
     bng = _FakeBng()
     clock = sim_clock.wrap(bng, deterministic=False, speed_factor=4)
@@ -328,7 +328,7 @@ def test_the_filter_is_not_added_twice():
 def test_the_episode_mirror_follows_episodes_not_a_step_count():
     """At ~1084 steps/episode, mirroring every 500 steps was twice an episode.
     Free-running episodes are ~50 steps, so the same 500 meant the per-run file
-    did not exist until episode 10 -- the monitor read as frozen because there
+    did not exist until episode 10, the monitor read as frozen because there
     was nothing to read."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     src = open(os.path.join(root, "train_residual.py"), encoding="utf-8").read()
@@ -374,7 +374,7 @@ def test_the_reason_is_recorded_where_someone_would_retry_it():
 
 
 def test_the_free_run_clock_still_works():
-    """Free-running is unaffected -- it never used step()."""
+    """Free-running is unaffected, it never used step()."""
     import sim_clock
     bng = _FakeBng()
     clock = sim_clock.wrap(bng, deterministic=False, speed_factor=10)

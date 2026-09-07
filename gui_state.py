@@ -1,7 +1,7 @@
 """Remembers what the Training tab was set to, across app restarts and across
 algorithm switches.
 
-Two separate losses, one cause -- nothing was ever written down:
+Two separate losses, one cause, nothing was ever written down:
 
   * Closing the app forgot every training box. settings.json exists but holds
     the SIMULATOR config (and is read by the trainer at launch), so the

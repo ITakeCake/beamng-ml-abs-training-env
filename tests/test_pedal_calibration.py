@@ -1,7 +1,7 @@
 """Pedal position is part of the calibration key.
 
 The references are measured at a specific pedal position, and a half-pedal stop
-physically cannot reach the full-pedal lockup floor -- scored against those
+physically cannot reach the full-pedal lockup floor, scored against those
 anchors it lands near -2.9, far BELOW "locked wheels", however well it
 modulates. Indistinguishable from failing.
 
@@ -38,7 +38,7 @@ def test_a_list_costs_only_what_was_asked_for():
 
 def test_a_list_and_a_range_of_the_same_endpoints_are_different_things():
     """"0.5,1.0" is two levels; "0.5-1.0" is everything between. A tuple could
-    not tell these apart -- both are two numbers."""
+    not tell these apart, both are two numbers."""
     assert pedal_levels(parse_pedal_spec("0.5,1.0")) == [0.5, 1.0]
     assert len(pedal_levels(parse_pedal_spec("0.5-1.0"))) == 51
 
@@ -159,7 +159,7 @@ def test_stepped_mode_passes_no_speed_flags():
 # ------------------------------------------------------------- regime record
 def test_a_row_records_how_it_was_measured():
     """Two regimes in one table are not strictly comparable, and the table IS
-    the ruler -- a silently mixed one would move the zero point for some
+    the ruler, a silently mixed one would move the zero point for some
     configurations and not others."""
     from calibration import summarize, regime_name, DETERMINISTIC
     assert summarize([1.0, 1.1])["regime"] == DETERMINISTIC

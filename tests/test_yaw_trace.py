@@ -1,6 +1,6 @@
 """YawTrace decomposes an episode's yaw-error integral. Its whole job is to
 distinguish turn-in transient (a procedure problem) from evenly-spread error
-(a threshold problem) -- two causes that produce the same total, which is why
+(a threshold problem), two causes that produce the same total, which is why
 the total alone could not settle the 0.1 rad question."""
 import os
 import sys
@@ -54,7 +54,7 @@ def test_a_transient_episode_is_identified_by_its_head_fraction():
 
 
 def test_an_evenly_spread_episode_has_a_low_head_fraction():
-    """Same total, spread flat -- the threshold, not the procedure, is tight."""
+    """Same total, spread flat, the threshold, not the procedure, is tight."""
     trace = YawTrace()
     for _ in range(1000):        # 5 s at constant error
         trace.push(0.0824, DT)
@@ -149,7 +149,7 @@ def test_bias_ratio_separates_a_car_that_understeers_from_one_being_shaken():
 
 def test_error_accumulated_after_the_car_has_stopped_is_measured():
     """target = v/R goes to zero at walking pace, so any residual rotation is
-    graded against a demand of zero -- and it decided which corner episodes
+    graded against a demand of zero, and it decided which corner episodes
     crossed the threshold (34% of the integral in the worst one)."""
     d = CornerDiag()
     for _ in range(800):

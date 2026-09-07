@@ -13,7 +13,7 @@ def residual_to_brakes(action, pedal):
     rr_rel = min(1.0, max(0.0, float(action[1])))
     front = min(1.0, max(BRAKE_FLOOR, float(pedal) * (1.0 - fr_rel)))
     rear = min(1.0, max(BRAKE_FLOOR, float(pedal) * (1.0 - rr_rel)))
-    return (front, front, rear, rear)   # (fr, fl, rr, rl) — axle-locked
+    return (front, front, rear, rear)   # (fr, fl, rr, rl), axle-locked
 
 
 def wheel_release_to_brakes(action, pedal):
@@ -73,7 +73,7 @@ def _pedal_value(text):
 
 class PedalSpec:
     """How the driver's pedal position varies between episodes. One value is
-    drawn per episode and HELD for the whole stop -- it never moves mid-stop.
+    drawn per episode and HELD for the whole stop, it never moves mid-stop.
 
     Three modes, mirroring GripSpec:
       fixed  "0.6"            one concrete level
@@ -97,7 +97,7 @@ class PedalSpec:
         return self.mode == "range" and self.values[0] != self.values[1]
 
     def levels(self):
-        """The values this can draw -- exactly what needs calibrating."""
+        """The values this can draw, exactly what needs calibrating."""
         if self.mode in ("fixed", "list"):
             return list(self.values)
         lo, hi = self.values
@@ -157,15 +157,15 @@ GRIP_DP = 3                        # must match calibration.config_key's roundin
 
 class GripSpec:
     """How tire grip varies between episodes. Three modes:
-      fixed  "0.6"            -- one concrete level
-      list   "0.5,0.75,1.0"   -- randomized between runs, but only among these
-      range  "0.4-1.0"        -- randomized continuously between runs
+      fixed  "0.6"          , one concrete level
+      list   "0.5,0.75,1.0" , randomized between runs, but only among these
+      range  "0.4-1.0"      , randomized continuously between runs
 
     `None` (not a GripSpec) means off/stock: never touch grip at all.
 
     Draws are rounded to the same precision calibration.config_key uses, so a
     drawn level can actually key a calibration row. A continuous range can
-    still draw a value nothing was calibrated at -- hence
+    still draw a value nothing was calibrated at, hence
     `needs_continuous_calibration`, which the trainer checks before pairing it
     with a normalized reward."""
 
@@ -230,7 +230,7 @@ def parse_grip_spec(text):
 # Deployment ceiling, not a training one: the trained weights are exported into
 # a Lua controller that runs the network by hand every 0.5 ms physics tick
 # inside BeamNG. Depth costs latency there, and a net that cannot keep up does
-# not fail loudly -- it just misses ticks.
+# not fail loudly, it just misses ticks.
 NET_MAX_LAYERS = 24
 NET_MAX_WIDTH = 2048
 NET_MIN_WIDTH = 8
@@ -270,7 +270,7 @@ def parse_net_arch(text):
         raise ValueError(f"bad network shape: {text!r}")
     if len(layers) > NET_MAX_LAYERS:
         raise ValueError(
-            f"{len(layers)} layers exceeds the {NET_MAX_LAYERS}-layer limit -- the "
+            f"{len(layers)} layers exceeds the {NET_MAX_LAYERS}-layer limit, the "
             f"exported network is evaluated by hand in Lua every 0.5 ms physics "
             f"tick, and a net too slow to keep up misses ticks silently.")
     for w in layers:

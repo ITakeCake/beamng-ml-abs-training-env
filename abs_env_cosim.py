@@ -57,7 +57,7 @@ def set_control_dt(dt):
     ``sendSkips = ceil(time3rdParty / physicsDt) - 1`` (tech/cosimulationCoupling
     .lua), and physics is 2 kHz, so DT is literally the control period. 0.01 is
     100 Hz, 0.005 is 200 Hz. Closed-loop braking is delay-limited at 100 Hz --
-    see docs/CONTROL_CEILING.md -- so this is a first-class training knob.
+    see docs/CONTROL_CEILING.md, so this is a first-class training knob.
 
     Must be called BEFORE constructing the env: the link takes DT at build time.
     """

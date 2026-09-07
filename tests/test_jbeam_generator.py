@@ -1,7 +1,7 @@
 """jbeam_generator writes the multi-model ML-ABS mod: one parent part per
 supported car (declaring the model sub-slot + a controller-less placeholder
 child) plus one child part per exported trained model. Pure string/dict
-generation + real zip scanning -- no game imports."""
+generation + real zip scanning, no game imports."""
 import json
 import os
 import sys
@@ -89,7 +89,7 @@ def test_generate_parent_jbeam_declares_the_model_subslot_and_placeholder():
 
 def test_one_variant_is_emitted_per_candidate_slot():
     """A car's real socket is not identifiable from its files alone, and a wrong
-    guess is silent -- the part loads and never appears. Unused variants are
+    guess is silent, the part loads and never appears. Unused variants are
     inert, since jbeam drops a part whose slotType nothing offers."""
     data = json.loads(generate_parent_jbeam(
         "etk800", ["etk800_ABS", "etk_DSE_ABS", "pickup_ABS"]))

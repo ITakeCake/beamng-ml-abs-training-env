@@ -4,7 +4,7 @@ Deployment-Clock In-Car ABS Learning Environment.
 Subclass of abs_env.ABSLearningEnv (BUILD_SPEC_incar_training.md §4). The point of
 this env: make SAC train against the EXACT loop that deploys.
 
-In the parent env (abs_env.py) Python drives the loop — it calls
+In the parent env (abs_env.py) Python drives the loop, it calls
 `abstelemetry.readAll()` every step, which runs `buildSensorData()` and DRAINS a
 clean 1-step poll window. The NN therefore sees pristine, training-distribution
 obs. The deployed in-car controller (MTB-ML-ABS.lua) instead builds obs IN-TICK on
@@ -19,7 +19,7 @@ poll-window drainer. Python only:
     telemetry electrics (`tel_fused_speed`, `tel_last_brake_avg_g`,
     `tel_last_brake_dist`, `mlabs_heading`)
 
-The env NEVER calls readAll/buildSensorData/exchangeData — doing so would steal the
+The env NEVER calls readAll/buildSensorData/exchangeData, doing so would steal the
 controller's poll window (corrupting its obs) AND recreate the old TCP loop.
 
 Reward v5.0 is COPIED BYTE-IDENTICAL from abs_env.step(): every constant and
@@ -56,7 +56,7 @@ CONTROLLER_NAME = 'MTB-ML-ABS'
 # The DEPLOY car: this .pc has the ABS slot + MTB-ML-ABS controller loaded. The
 # training car (Machine-Trainer-Boy.pc, parent default) has NO ABS slot, so the
 # controller would never load. We MUST force the MLABS car here.
-# (PPO_V2, 2026-07-11): switched to Blake's Machine-Trainer-Boy-V2 — etk800 SEDAN
+# (PPO_V2, 2026-07-11): switched to Machine-Trainer-Boy-V2, etk800 SEDAN
 # Rennspecht build on sport_plus tires (same platform class as the 1FEX 1.283g
 # baseline). V2-MLABS = V2 byte-identical except etk_DSE_ABS -> etk_DSE_ABS_MTB_ML.
 VEHICLE_PC_INCAR = 'vehicles/etk800/Machine-Trainer-Boy-V2-MLABS.pc'
@@ -93,7 +93,7 @@ class ABSLearningEnvIncar(ABSLearningEnv):
     def _poll_electrics(self):
         """Poll the already-attached 'electrics' sensor (TCP read of electrics.values).
         Does NOT call any Lua function on the vehicle VM and does NOT drain the poll
-        window — this is the ONLY per-step Python<->VM read besides the mailbox write."""
+        window, this is the ONLY per-step Python<->VM read besides the mailbox write."""
         self.vehicle.sensors.poll()
         return self.vehicle.sensors['electrics']
 
@@ -118,7 +118,7 @@ class ABSLearningEnvIncar(ABSLearningEnv):
         ride through engage+warmup, and return the controller-PUBLISHED obs0.
 
         This deliberately re-implements the parent reset body (rather than calling
-        super().reset() then patching) because the parent returns self._get_obs() — a
+        super().reset() then patching) because the parent returns self._get_obs(), a
         sensors.poll()-based obs that does NOT match the controller's published obs and
         would corrupt the frame stack's first frame. Only these differ from parent:
           (a) handoff = slam driver brake (the controller owns brakes in-car),
@@ -183,7 +183,7 @@ class ABSLearningEnvIncar(ABSLearningEnv):
         self.vehicle.queue_lua_command('wheels.setABSBehavior("off")')
         self.bng.step(2)
 
-        # --- (PPO_V2, 2026-07-11) SINGLE simple regime (Blake's spec): accelerate to
+        # --- (PPO_V2, 2026-07-11) SINGLE simple regime (the spec): accelerate to
         # target+2mph, coast down IN GEAR, brakes begin AT the target crossing.
         # (Was 50/50 instant-brake / coast-down.)
         self._reset_mode = 2
@@ -217,12 +217,12 @@ class ABSLearningEnvIncar(ABSLearningEnv):
         # --- (PPO_V2, 2026-07-11) 2kHz-EXACT BRAKE ONSET ---
         # Throttle off at target+2mph, flip to DETERMINISTIC immediately, then arm the
         # in-Lua slam: abstelemetry.onPhysicsStep checks instSpeed (obj:getVelocity()
-        # :length() — the SAME signal the standard brake metric uses) every 0.5ms tick
+        # :length(), the SAME signal the standard brake metric uses) every 0.5ms tick
         # and latches input.brake=1 on the exact tick of the target crossing. The old
-        # Python coast loop polled stale electrics at ~50Hz WALL-CLOCK — onset could
+        # Python coast loop polled stale electrics at ~50Hz WALL-CLOCK, onset could
         # land tenths of a mph late. The chunked stepping below is just transport;
         # onset precision comes from the 2kHz in-Lua check, not the chunk size.
-        # Coast is IN GEAR (drive) — no neutral shift here; the car stays in gear
+        # Coast is IN GEAR (drive), no neutral shift here; the car stays in gear
         # through the stop until ~2.5 mph, where step() drops it to neutral once.
         self.vehicle.control(throttle=0.0, steering=0)
         self.bng.control.pause()
@@ -249,7 +249,7 @@ class ABSLearningEnvIncar(ABSLearningEnv):
         # latched in-Lua at the exact crossing; mirror it from the game-input
         # side so beamngpy's input state agrees. Controller engage fires on
         # driverBrake>0.9 && speed>8.0 -> onEngage -> resetAccum + warmup.
-        # (PPO_V2) IN GEAR — no gear=0. Car stays in drive until ~2.5 mph.
+        # (PPO_V2) IN GEAR, no gear=0. Car stays in drive until ~2.5 mph.
         # ====================================================================
         self.vehicle.control(brake=1.0, throttle=0.0)
         # Re-assert ext mode AGAIN after the teleport re-init (defensive; also done
@@ -311,14 +311,14 @@ class ABSLearningEnvIncar(ABSLearningEnv):
         self._seq += 1
 
         # --- MAILBOX WRITE (before step; consumed by the tick inside this step, k=0
-        #     convention — verified by T1). One atomic call delivers 4 floats + seq. ---
+        #     convention, verified by T1). One atomic call delivers 4 floats + seq. ---
         self.vehicle.queue_lua_command(
             f"{self._ctrl_call}.setExtCmd({fr},{fl},{rr},{rl},{self._seq})")
         # Keep the driver pedal slammed so the controller stays engaged. The deployed
         # controller overwrites input.brake with maxBrake internally anyway, so this
-        # is purely "stay engaged" — the controller's per-wheel cmd comes from setExtCmd.
+        # is purely "stay engaged", the controller's per-wheel cmd comes from setExtCmd.
         # (PPO_V2) Stay in DRIVE until ~2.5 mph, then drop to NEUTRAL exactly once
-        # (Blake's regime — avoids auto-box creep fighting the final stop).
+        # (the chosen regime, avoids auto-box creep fighting the final stop).
         if not self._neutral_dropped and self._last_gps_speed < 1.118:  # 2.5 mph
             self.vehicle.control(brake=1.0, gear=0)
             self._neutral_dropped = True
@@ -336,7 +336,7 @@ class ABSLearningEnvIncar(ABSLearningEnv):
         self.prev_brakes = brakes.astype(np.float32)  # bookkeeping parity (unused for obs)
 
         # =================================================================
-        # REWARD v5.0 — BYTE-IDENTICAL arithmetic, non-draining input sources.
+        # REWARD v5.0, BYTE-IDENTICAL arithmetic, non-draining input sources.
         # =================================================================
         # Inputs (see mapping table §4.5):
         #   gy_avg  -> published obs[4] (== controller's gy_avg, mlabs_o4)
@@ -354,7 +354,7 @@ class ABSLearningEnvIncar(ABSLearningEnv):
             self._spd_ep_errors.append(spd_error)
 
         # Per-episode stat tracking (parent semantics; slip unavailable without drain,
-        # so ep_peak_slip stays 0 — it's a diagnostic-only field, never in reward).
+        # so ep_peak_slip stays 0, it's a diagnostic-only field, never in reward).
         braking_g_gs = abs(braking_g_ms2) / 9.81
         self.ep_peak_g = max(self.ep_peak_g, braking_g_gs)
         self.ep_max_yaw = max(self.ep_max_yaw, abs(yaw_rate))
@@ -367,7 +367,7 @@ class ABSLearningEnvIncar(ABSLearningEnv):
         reward += step_g_rew
         self.ep_step_g_sum += step_g_rew
 
-        # heading_error — grading-side ONLY (crash terminal at >CRASH_HEADING).
+        # heading_error, grading-side ONLY (crash terminal at >CRASH_HEADING).
         # Parent reads heading from readAll()['heading'] (DRAINS). Here: mlabs_heading
         # (controller publishes obj:getDirection() scalar every physics step, no drain).
         self.current_heading = float(e.get('mlabs_heading', self.current_heading))
@@ -389,7 +389,7 @@ class ABSLearningEnvIncar(ABSLearningEnv):
 
         yaw_pen = yaw_bonus  # alias parity with parent's audit-log naming
 
-        # --- Audit log (per-step, non-terminal rows) — parent format ---
+        # --- Audit log (per-step, non-terminal rows), parent format ---
         force_override = 0
         self._audit_step_data = (obs, brakes, predicted_speed, gps_speed_for_spd,
                                  braking_g_gs, force_override,
@@ -409,7 +409,7 @@ class ABSLearningEnvIncar(ABSLearningEnv):
 
         # ─── stop-detect speed: NON-draining source ──
         # Parent's stop gate (abs_env.py:936) uses data['inst_speed'] with a fallback to
-        # data['airspeed'] — both are BODY/GPS velocity that reach ~0 at standstill. We
+        # data['airspeed'], both are BODY/GPS velocity that reach ~0 at standstill. We
         # MUST match that: use the stock non-draining 'airspeed' electric here.
         #
         # NOTE (validated in-sim, 2026-06-05): tel_fused_speed CANNOT be used for the stop

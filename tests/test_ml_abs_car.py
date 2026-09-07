@@ -1,7 +1,7 @@
 """A .pc without the ML ABS part cannot run in-car training: the env spawns the
 car, slams the brakes, and waits for a controller that will never report in.
 The failure surfaced as "active=None, warmup=None, tickseq=None" two minutes
-after the game booted -- naming the symptom, not the cause. Checked up front."""
+after the game booted, naming the symptom, not the cause. Checked up front."""
 import json
 import os
 import sys
@@ -26,7 +26,7 @@ def test_the_real_training_car_passes():
 
 
 def test_the_car_that_actually_broke_a_run_is_refused():
-    """Machine-Trainer-Boy.pc names no ABS slot at all -- the run died on it."""
+    """Machine-Trainer-Boy.pc names no ABS slot at all, the run died on it."""
     problem = check_ml_abs_car(os.path.join(CARS, "Machine-Trainer-Boy.pc"))
     assert problem and "no ABS slot" in problem
 
@@ -48,7 +48,7 @@ def test_every_refusal_says_what_to_do_instead():
 
 
 def test_a_bom_prefixed_pc_is_read_not_rejected(tmp_path):
-    """BeamNG writes these with a UTF-8 BOM often enough to matter -- one broke
+    """BeamNG writes these with a UTF-8 BOM often enough to matter, one broke
     the game's own vehicle cache earlier in this project."""
     p = tmp_path / "bom.pc"
     p.write_bytes(b"\xef\xbb\xbf" + json.dumps(

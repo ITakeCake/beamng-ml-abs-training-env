@@ -1,7 +1,7 @@
 """Live training statistics, derived from the episode log.
 
 The trainer already writes one CSV row per finished episode, so nothing about
-training needs to change to report progress -- this reads what is already
+training needs to change to report progress, this reads what is already
 there. Keeping it a pure function of (rows, total_steps) means every number
 below is testable without a game, which matters most for the two that are easy
 to get quietly wrong: the trend and the ETA.
@@ -52,7 +52,7 @@ class TrainStats:
         self.trend_per_100 = trend_per_100
         self.eta_seconds = eta_seconds
         self.steps_per_sec = steps_per_sec
-        self.series = series or []    # [(episode, avg_g), ...]
+        self.series = series or []    # [(episode, avg_g)...]
         self.crashes = crashes
 
     @property
@@ -67,7 +67,7 @@ class TrainStats:
         as 'flat' rather than as a direction the data does not support.
 
         The band is set from measured noise, not taste. PPO-05's avg_g median
-        drifted about 0.03 g across 400 episodes -- roughly 0.0075 g per 100 --
+        drifted about 0.03 g across 400 episodes, roughly 0.0075 g per 100 --
         while the policy demonstrably did not improve (full-pedal episodes were
         flat at 0.983). So anything under 0.01 g per 100 episodes is inside
         what that run produced by chance alone."""
@@ -103,7 +103,7 @@ def trend_slope(values):
 
     That matters more than usual for this signal. avg_g swings with the pedal
     draw (0.79 correlation on PPO-05) far harder than it moves with learning,
-    so the outliers are not rare events -- they are most of the data.
+    so the outliers are not rare events, they are most of the data.
 
     O(n^2) in the window, which at TREND_WINDOW=40 is 780 pairs: nothing, and
     paid once per two-second refresh.

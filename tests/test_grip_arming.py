@@ -1,7 +1,7 @@
 """The parent's reset() is monolithic: the teleport reloads the vehicle Lua
 extension (losing module state) and there is no hook between that and the
 armBrakeSlam call. So the grip arm is injected into the queued-command stream
-right after armBrakeSlam -- which is safe because the slam only FIRES later,
+right after armBrakeSlam, which is safe because the slam only FIRES later,
 when the coast-down crosses the target speed."""
 import os
 import sys

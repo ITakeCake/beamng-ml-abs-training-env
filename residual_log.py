@@ -3,7 +3,7 @@
 Only ENTRY POINTS call setup_logging() (trainer main -> runs/<run>/train.log,
 probe main -> logs/probe.log, GUI -> logs/gui.log). Library code (the env
 subclass, callbacks) just does `logging.getLogger("residual.env")` and never
-opens files -- whoever configured the root handlers decides where lines land.
+opens files, whoever configured the root handlers decides where lines land.
 
 Format:  22:31:05.123 INFO  [env] message
 """
@@ -77,7 +77,7 @@ def quiet_beamngpy(level=logging.WARNING):
 
 def setup_logging(file_path, component="main", level=logging.INFO, console=True):
     """Configure the root logger once: UTF-8 file + console, uncaught-exception
-    hook. Idempotent -- a second call with the same file adds no handlers."""
+    hook. Idempotent, a second call with the same file adds no handlers."""
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
     fmt = logging.Formatter(_FMT, datefmt=_DATEFMT)
@@ -171,7 +171,7 @@ class YawTrace:
 
     So the integral is accumulated into fixed-width time buckets as well as in
     total, and the head of the episode is measured separately. Nothing here
-    decides anything -- it reports, so the decision has evidence under it."""
+    decides anything, it reports, so the decision has evidence under it."""
 
     BUCKET_S = 0.5
     HEAD_S = 0.5          # "turn-in transient" window, from brake onset

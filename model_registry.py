@@ -1,7 +1,7 @@
 """Lists finished training runs (runs/<name>/final.zip + vecnormalize.pkl) as
 export candidates for the Output tab, with the metadata export needs: which
 algo, which car it trained on, and its best logged avg_g. Pure filesystem +
-text parsing -- no game/SB3 imports, so this stays fast and testable offline.
+text parsing, no game/SB3 imports, so this stays fast and testable offline.
 """
 import ast
 import csv
@@ -33,9 +33,9 @@ def _model_from_vehicle_pc(vehicle_pc):
 
 
 def _parse_args_line(train_log_path):
-    """The trainer logs one line starting with 'args: {...}' -- a literal
+    """The trainer logs one line starting with 'args: {...}', a literal
     Python dict repr (it's logged via %s on the argparse Namespace's vars()).
-    ast.literal_eval, never eval -- these are our own log files, but there's
+    ast.literal_eval, never eval, these are our own log files, but there's
     no reason to use anything but the safe parser for a dict literal."""
     try:
         with open(train_log_path, encoding="utf-8", errors="replace") as fh:

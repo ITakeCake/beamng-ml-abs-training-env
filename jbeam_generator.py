@@ -9,7 +9,7 @@ per-car mod DynamicABS-E already ships a real ABS-replacement jbeam part per
 car (20 cars) using the exact single-part pattern the parent part here also
 uses for its ABS slotType.
 
-Pure JSON/string generation + real zip scanning -- no game imports.
+Pure JSON/string generation + real zip scanning, no game imports.
 """
 import json
 import os
@@ -23,13 +23,13 @@ PLACEHOLDER_PART_NAME = "mlabs_none"
 def find_abs_slot_types(vehicles_dir, include_common=True):
     """{model_name: (slot_types, display_name)} for every Car-type model zip in
     vehicles_dir, where slot_types is EVERY ABS-ish slot name reachable for that
-    car -- its own jbeam plus (include_common) the shared parts files, since the
+    car, its own jbeam plus (include_common) the shared parts files, since the
     whole ETK family gets its socket from common.zip rather than its own zip.
 
     Plural, and deliberately generous. jbeam silently ignores a part whose
     slotType nothing offers, so naming a socket a car does not have costs
     nothing, while MISSING the one it does have makes the part load and never
-    appear -- a failure with no error message anywhere. DynamicABS (this
+    appear, a failure with no error message anywhere. DynamicABS (this
     project's own 20-car mod, shipped and working) resolves it the same way:
     one identical file per car declaring all 22 slot types."""
     out = {}
@@ -94,7 +94,7 @@ def _common_abs_slots(vehicles_dir):
 
 def generate_parent_jbeam(model, slot_types):
     """The "ML ABS" part, emitted ONCE PER candidate ABS slot. Its only children
-    are a controller-less placeholder (the default -- brakes stay at stock
+    are a controller-less placeholder (the default, brakes stay at stock
     capacity but nothing scales them, i.e. inert/off) plus, once exported, one
     part per trained model in MODEL_SLOT_TYPE.
 
@@ -139,7 +139,7 @@ def generate_model_jbeam(model, run_name, weights_module,
         part_name: {
             "information": {
                 "authors": "ML ABS Training Environment",
-                "name": f"ML ABS — {run_name}",
+                "name": f"ML ABS, {run_name}",
                 "value": 250,
             },
             "slotType": MODEL_SLOT_TYPE,

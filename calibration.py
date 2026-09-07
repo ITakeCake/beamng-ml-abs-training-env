@@ -2,15 +2,15 @@
 on (PLAN_V2.md section 2).
 
 Two references per configuration, both MEASURED, never assumed:
-  slam_g  -- zero-action full lockup: the observed floor. Not an ABS, not
+  slam_g, zero-action full lockup: the observed floor. Not an ABS, not
              claimed to be optimal; just what this car does on this surface
              with the wheels locked.
-  stock_g -- the car's stock BeamNG ABS on the same config. A competitor used
+  stock_g, the car's stock BeamNG ABS on the same config. A competitor used
              as a ruler, nothing more.
 
 There is deliberately NO ceiling reference. BeamNG is emergent; no ABS mode
 (arcade included) is trusted as a physical limit, so the score is unbounded
-above -- nobody knows where the limit is.
+above, nobody knows where the limit is.
 
 Pure data/math: no game imports, no I/O beyond the table's own JSON file.
 """
@@ -59,11 +59,11 @@ DETERMINISTIC = "deterministic"
 
 def regime_name(speed_factor=1.0, live=False):
     """How a row was measured. Recorded because two regimes in one table are
-    not comparable to each other, and a table IS the ruler -- a silently mixed
+    not comparable to each other, and a table IS the ruler, a silently mixed
     one would shift the zero point for some configurations and not others.
 
     Measured 2026-08-30, interleaved A/B at 60 mph full pedal: deterministic
-    1.0135, live x4 1.0214, x10 1.0091, x25 1.0066 -- all within 0.8%, which is
+    1.0135, live x4 1.0214, x10 1.0091, x25 1.0066, all within 0.8%, which is
     smaller than any single arm's own run-to-run spread (~0.02). So the regimes
     are equivalent at that configuration; the label exists because that was
     established for ONE configuration, not proven universally."""
@@ -101,7 +101,7 @@ def normalized_g(g, slam_g, stock_g):
         raise ValueError(
             f"degenerate reference gap: stock_g={stock_g:.4f} is not meaningfully "
             f"above slam_g={slam_g:.4f} (gap {gap:.4f} < {MIN_REFERENCE_GAP_G}). "
-            f"Nothing can be normalized against this config -- re-measure it, or "
+            f"Nothing can be normalized against this config, re-measure it, or "
             f"exclude it from the training matrix.")
     return (float(g) - float(slam_g)) / gap
 
@@ -132,14 +132,14 @@ class CalibrationTable:
         row = self.rows.get(key)
         if row is None:
             raise KeyError(
-                f"no calibration row for {key!r} on car {self.car!r} -- run "
+                f"no calibration row for {key!r} on car {self.car!r}, run "
                 f"'Calibrate baselines' for this configuration before training "
                 f"on it (refusing to reuse another config's anchors).")
         missing = [r for r in REFERENCES if r not in row]
         if missing:
             raise KeyError(
                 f"calibration row {key!r} on car {self.car!r} is missing "
-                f"{missing} -- both references are required to normalize.")
+                f"{missing}, both references are required to normalize.")
         return row["slam"]["median"], row["stock"]["median"]
 
     def put_steering(self, key, steering, measured_radius):
@@ -153,7 +153,7 @@ class CalibrationTable:
         entry = self.steering.get(key)
         if entry is None:
             raise KeyError(
-                f"no steering angle for {key!r} on car {self.car!r} -- run the "
+                f"no steering angle for {key!r} on car {self.car!r}, run the "
                 f"steering seek for this corner before training it.")
         return entry["steering"]
 

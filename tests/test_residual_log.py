@@ -7,11 +7,11 @@ def test_setup_logging_writes_utf8_file_and_is_idempotent(tmp_path):
     path = tmp_path / "t.log"
     log = setup_logging(str(path), component="test")
     log2 = setup_logging(str(path), component="test")   # second call must NOT double handlers
-    log.info("arrow → dash — ok")
+    log.info("arrow → dash, ok")
     for h in logging.getLogger().handlers:
         h.flush()
     text = path.read_text(encoding="utf-8")
-    assert text.count("arrow → dash — ok") == 1
+    assert text.count("arrow → dash, ok") == 1
     assert "INFO" in text and "[test]" in text
     file_handlers = [h for h in logging.getLogger().handlers
                      if isinstance(h, logging.FileHandler) and h.baseFilename == str(path.resolve())]

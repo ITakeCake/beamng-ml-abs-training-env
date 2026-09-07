@@ -2,34 +2,11 @@ local M = {}
 M.type = "auxiliary"
 
 -- =====================================================================
--- MTB-ML-ABS.lua  —  ML-policy ABS controller for the etk800 wagon
+-- MTB-ML-ABS.lua, ML-policy ABS controller for the etk800 wagon
 -- =====================================================================
--- Runs the SAC ABS policy that was trained in MachineTrainerBoy. The exact
--- observation / action / normalization contract is mirrored from:
---   abs_env.py            (_build_obs_from_data, 27-dim raw obs, clip bounds)
---   demo_collect.py       (FrameStacker: 16 frames, oldest-FIRST, newest-LAST)
---   train.py              (VecFrameStack(16) -> VecNormalize, norm_obs only)
---   abstelemetry.lua      (per-wheel brake actuation, wheel-order contract)
---   ABS-1FEX.lua          (physics-rate M.update + 200Hz self-subdivision)
---
--- Architecture:
---   * Dispatched as M.update at PHYSICS rate (~2000Hz) — same as 1FEX.
---   * Self-subdivides to a 200Hz control tick with a dt accumulator.
---   * Kinematic longitudinal g is computed from obj:getVelocity() deltas
---     accumulated over the physics substeps WITHIN each 200Hz tick (matches
---     abs_env's gy_avg = (pollSpeedStart - instSpeed) / pollDtSum exactly).
---   * Forward pass is plain Lua over weight tables loaded from
---     lua/vehicle/controller/mtb_ml_weights.lua (produced by the exporter).
---   * All activation buffers are preallocated ONCE at init — no per-tick alloc.
---   * Actuation is delegated to extensions.abstelemetry.setBrakes(fr,fl,rr,rl)
---     so the deployed controller and the trained policy share identical
---     brake semantics. On disengage we restore wd.ref.brakeTorque ourselves.
---
--- Wheel-order contract (load-bearing — see abs_env.py:938-941, ABS-1FEX:110):
---   wheelRotator / wheelData index -> corner:  1=RR, 2=RL, 3=FR, 4=FL
---   brake command slot order:                  1=FR, 2=FL, 3=RR, 4=RL
---   bridge wheelToBrakeMap = {3,4,1,2}  (logical wheel i -> command slot)
---   obs wheel-speed order (raw[0..3]):         FR, FL, RR, RL
+-- Observation, action, and normalization contract mirrors abs_env.py.
+-- Physics-rate update self-subdivides to 200 Hz control ticks.
+-- Actuation via abstelemetry.setBrakes(fr,fl,rr,rl).
 -- =====================================================================
 
 -- ---- timing ---------------------------------------------------------
@@ -55,47 +32,20 @@ local ENGAGE_SPEED_MS     = 8.0            -- and airspeed must exceed this (m/s
 local DISENGAGE_SPEED_MS  = 0.5            -- below this -> disengage (stopped)
 local active        = false
 local mlabsTicks    = 0                    -- total 200Hz ticks while active
--- Driver-pedal latch: while active, the controller OVERWRITES input.brake with
--- maxBrake (the actuation fix). That overwrite would otherwise corrupt the
--- engage/disengage logic (which keys off input.brake). lastWrittenBrake records
--- what WE last wrote; if input.brake still equals it, the driver hasn't touched
--- the pedal since -> treat intent as "still held". Any other value == genuine
--- driver change (release). -1 sentinel = we haven't written this engage cycle.
+-- Driver-pedal latch: controller overwrites input.brake with maxBrake.
+-- lastWrittenBrake tracks what we wrote vs genuine driver changes.
 local lastWrittenBrake = -1
 local driverBrakeHeld  = false             -- latched driver intent while active
 
 -- ---- engage warmup (S1 fix: kill the accel->brake transition poll-window spike)
--- In abs_env, readAll() at reset (abs_env.py:575) DRAINS the entire acceleration
--- poll window right before handoff, so the policy's FIRST obs window spans only the
--- ~2 settle substeps after the throttle was cut — a small, DECEL-dominant window
--- (gy_max ~ +3.8, gy_avg ~ -0.2). In deployment NOTHING drains the window between
--- the accel phase and the first control tick: the first runTick consumed a window
--- that still spanned the throttle->brake transition with the car at peak speed and
--- brake torque still slewing in, yielding a huge ACCEL-signed g spike (gy_avg ~ -8,
--- gy_min ~ -12, gy_max ~ -9 — pure acceleration). That out-of-distribution first
--- frame poisoned the 16-frame stack and the policy ramped the FRONTS to lock within
--- ~5 ticks (det@80 0.84g, 27% front-lock).
---
--- Fix: for the first WARMUP_TICKS active ticks, BUILD the obs (which drains the
--- poll window) but DISCARD it (no stack push, no forward pass, no ML brake write),
--- and re-arm resetAccum so the NEXT window accumulates only clean post-engage decel.
--- The stock full-torque pipeline brakes during these <=2 ticks (~10ms) — identical
--- to training, where the car was already braking-decel before the first ML action.
--- WARMUP_TICKS flush windows; during them apply a GENTLE per-wheel brake (not the
--- stock full-torque pipeline, which would lock the unmodulated 3100Nm fronts at
--- ~37m/s within ~10ms before the policy ever acts, and not zero, which would stall
--- the car's decel). WARMUP_BRAKE mirrors the policy's own typical first action
--- (~0.05) so the car is in a gentle-decel state — exactly the world-state training's
--- first ML step inherited.
+-- Warmup: first WARMUP_TICKS ticks discard the accel-to-brake transition window.
+-- Applies gentle WARMUP_BRAKE instead of full torque during the flush.
 local WARMUP_TICKS  = 2
 local WARMUP_BRAKE  = 0.05
 local pendingWarmup = 0
 
 -- ---- weights module (loaded lazily, fails loud if missing) ----------
--- Module name is configurable per jbeam part (see init(jbeamData) below) so
--- one controller can be shared by many trained-model parts in the same
--- MODEL_SLOT_TYPE slot -- each part's jbeamData.weights picks its own weights
--- file. Unset (nil) reproduces the exact pre-multi-model default.
+-- Weights module is configurable per jbeam part via jbeamData.weights.
 local weightsModule = "controller/mtb_ml_weights"
 local W = nil                              -- the weights table
 local weightsOk = false
@@ -131,12 +81,7 @@ local actBuf   = {}                        -- preallocated per-layer activations
 local cmd      = {0, 0, 0, 0}              -- brake command slots (FR,FL,RR,RL)
 
 -- ---- DEBUG INSTRUMENTATION (OFF by default) ------------------------
--- When M.debugObs is true, every 200Hz tick publishes the 27 raw obs as
--- electrics mlabs_o0..mlabs_o26 and the 4 final brake commands as
--- mlabs_c0..mlabs_c3. Toggleable at runtime from Python via electrics:
---   vehicle.queue_lua_command("electrics.values.mlabs_debug = 1")
--- (update() copies that electrics flag into M.debugObs each physics step).
--- Allocation-free: the electrics key strings are preallocated ONCE here.
+-- Debug: publishes raw obs and cmds to electrics when mlabs_debug = 1.
 M.debugObs = false
 local DBG_OBS_KEYS = {}                     -- ["mlabs_o0".."mlabs_o26"]
 local DBG_CMD_KEYS = {}                     -- ["mlabs_c0".."mlabs_c3"]
@@ -144,15 +89,8 @@ for k = 1, OBS_DIM do DBG_OBS_KEYS[k] = "mlabs_o" .. (k - 1) end
 for k = 1, ACT_DIM do DBG_CMD_KEYS[k] = "mlabs_c" .. (k - 1) end
 
 -- ---- EXT-MODE (in-car training mailbox; OFF by default) -------------
--- When M.extMode is true, the controller does NOT run the in-Lua NN forward
--- pass. Instead a Python SAC env mailboxes a 4-float brake action per 200Hz
--- tick via M.setExtCmd(...); the controller assembles the obs EXACTLY as in
--- deployed NN mode (buildSensorData -> buildRawObsFromData -> pushStack ->
--- publish), then applies the mailboxed cmd. This makes the trained loop ==
--- the deployed loop (see BUILD_SPEC_incar_training.md). All ext-mode code is
--- guarded by M.extMode; when it is false the deployed NN path is byte-for-byte
--- unchanged. Allocation-free: extCmd is a preallocated 4-slot table; the
--- electrics key strings reuse DBG_OBS_KEYS/DBG_CMD_KEYS (already preallocated).
+-- Ext-mode: Python mailboxes brake actions, skipping the in-Lua forward pass.
+-- Makes the trained loop identical to the deployed loop.
 M.extMode      = false
 M.deployLatencyTicks = 0                    -- one-tick output buffer at deploy if probe measures k=1 (spec §2)
 local extCmd        = {WARMUP_BRAKE, WARMUP_BRAKE, WARMUP_BRAKE, WARMUP_BRAKE}  -- mailboxed action (FR,FL,RR,RL)
@@ -249,10 +187,7 @@ function M.setExtCmd(fr, fl, rr, rl, seq)
 end
 
 -- =====================================================================
--- Module-scope sensor readers (hoisted out of buildRawObs so the 200Hz tick
--- does ZERO closure allocation). These reference only the vehicle-Lua globals
--- (obj, math) — no upvalues — so each is a single shared function object that
--- pcall() can call directly without building a closure every tick.
+-- Hoisted sensor readers. No closures, no per-tick allocation.
 -- =====================================================================
 local mathSqrt  = math.sqrt
 local mathAtan2 = math.atan2
@@ -281,22 +216,8 @@ end
 -- =====================================================================
 -- Weights module loading + buffer preallocation
 -- =====================================================================
--- The weights module (produced by export_mlabs.py) is in STRING-BLOB format
--- (immune to LuaJIT's 65,536 number-constant-per-prototype cap: numeric weight
--- payloads live inside long string literals, which don't count against the
--- per-prototype number-constant budget). It returns a table:
---   mod.obs_dim=432, mod.act_dim=4, mod.clip_obs=<num>, mod.eps=<num>
---   mod.obs_mean_s, mod.obs_var_s   : strings of 432 space-separated floats
---   mod.layers = { {rows,cols, b_s="...", W_s="..." | W_chunks={...}}, ... }
---     W_s / W_chunks are ROW-MAJOR: element (r,c) at flat idx (r-1)*cols+c.
--- loadWeights() parses every string ONCE here at init into preallocated Lua
--- number tables, verifies counts == rows*cols / rows, and rebuilds the SAME
--- post-parse structure the forward pass expects:
---   W.obs_mean[1..432], W.obs_var[1..432]
---   W.layers[li]._W[r][c]  (row-major, 1-based), W.layers[li].b[o]
---   W.layers[li]._act      ("relu" hidden, "linear" final mu head)
--- Activation is POSITIONAL: layers 1..N-1 ReLU, final layer linear (mu);
--- tanh + unscale->[0,1] are applied by the controller AFTER the MLP.
+-- STRING-BLOB format: weight payloads in long strings, parsed once at init.
+-- Preallocated Lua tables, verified counts match rows*cols.
 
 -- Parse a string of space-separated floats into a preallocated number table.
 -- Returns (table, count). count lets the caller verify the expected length.
@@ -482,7 +403,7 @@ end
 
 
 -- =====================================================================
--- Stack management — oldest FIRST (row 1), newest LAST (row N_STACK)
+-- Stack management, oldest FIRST (row 1), newest LAST (row N_STACK)
 -- =====================================================================
 local function resetStack()
   for f = 1, N_STACK do
@@ -528,7 +449,7 @@ end
 
 
 -- =====================================================================
--- Forward pass — plain Lua MLP over preallocated buffers
+-- Forward pass, plain Lua MLP over preallocated buffers
 -- =====================================================================
 -- Returns nothing; final layer output lands in actBuf[#layers][1..4] (the
 -- pre-squash actor mean mu). Caller applies tanh + unscale.
@@ -562,44 +483,10 @@ end
 
 
 -- =====================================================================
--- Build the 27-dim raw obs for the current 200Hz tick — FROM readAll DATA
+-- Build the 27-dim raw obs for the current 200Hz tick, FROM readAll DATA
 -- =====================================================================
--- REWIRED 2026-06-05: instead of re-deriving every channel in Lua (which
--- diverged in closed loop — gy_min pinned by the engage transient, yaw using
--- the instantaneous ESC reading instead of the poll-window mean, etc.), we now
--- consume the EXACT same producer the policy was trained on:
---   extensions.abstelemetry.buildSensorData()  -- the raw Lua table that
---   readAll() JSON-encodes; abs_env._build_obs_from_data(data) was fed exactly
---   this dict over TCP once per 200Hz step.
--- buildSensorData() also RESETS the poll-window accumulators (pollSpeedStart,
--- pollDtSum, pollFrames, pollGy*, pollYaw*), so calling it once per tick gives
--- the same "window since the previous setBrakes" semantics as training (3RT:
--- setBrakes -> step -> readAll). We call it at the TOP of runTick, before the
--- new action is computed — the relative timing matches training exactly.
---
--- VERIFIED 2026-06-05 (probe_pollframes.py): abstelemetry.onPhysicsStep fires
--- and fills the poll accumulators in BOTH deterministic AND live mode on .tech
--- (poll_frames ~155/50ms live, ~20/readAll det; gy_avg/gy_min/gy_max/yaw_avg
--- all populated in both). So buildSensorData() is reliable in both clock modes —
--- no live-mode fallback needed. (The old 39-day-old "onPhysicsStep is det-only"
--- note did not hold for abstelemetry on this .tech build.)
---
--- prev_brakes (raw[8..11]) stays controller-local — it is the policy's own last
--- action, not a sensor. Derivatives (rates / wheel accels, raw[22..27]) also stay
--- controller-local: the env computes them from successive `data` dicts, so we
--- derive them from successive buildSensorData() values (the SAME source).
---
--- field -> obs mapping (abs_env._build_obs_from_data, dims 0-based -> raw 1-based):
---   raw1 ws_fr = |data.ws3|   raw2 ws_fl = |data.ws4|
---   raw3 ws_rr = |data.ws1|   raw4 ws_rl = |data.ws2|
---   raw5 gy_avg = data.gy_avg     raw6 gx = data.gx_inst   raw7 yaw = data.yaw_avg
---   raw8-11 prev_brakes (controller-local)
---   raw12 gy_min = data.gy_min    raw13 gy_max = data.gy_max
---   raw14 rpm = data.rpm  raw15 gear = data.gear  raw16 steering = data.steering
---   raw17 pitch = data.pitch  raw18 roll = data.roll
---   raw19 input_brake = data.input_brake  raw20 input_throttle = data.input_throttle
---   raw21 gz = data.gz_inst
---   raw22 pitch_rate  raw23 roll_rate  raw24-27 wheel accels (controller-local deriv)
+-- Build raw obs from abstelemetry.buildSensorData() (the training producer).
+-- prev_brakes and derivatives stay controller-local.
 local function getf(t, k)
   local v = t[k]
   if type(v) == "number" then return v end
@@ -697,19 +584,8 @@ local haveTelem = false
 
 local function applyBrakesViaTelem()
   -- ---------------------------------------------------------------------
-  -- CRITICAL actuation contract (matches abs_env.py:620 training semantics):
-  --   The stock brake pipeline applies  desiredBrakingTorque = capacity * pedal,
-  --   where pedal == input.brake.  abstelemetry.setBrakes scales each wheel's
-  --   capacity by  cmd/maxBrake.  So the NET per-wheel torque is
-  --     origTorque * (cmd/maxBrake) * input.brake.
-  --   For this to equal the trained target  origTorque * cmd  (which is exactly
-  --   what training produced, because abs_env sets vehicle.control(brake=max(brakes))
-  --   == maxBrake every step), the effective pedal MUST equal maxBrake.
-  --   The live deploy / Python harness slams input.brake = 1.0, which inflates
-  --   every wheel by 1/maxBrake and pins the high-capacity FRONTS to full lock
-  --   (relative modulation is destroyed). We therefore force input.brake = maxBrake
-  --   here, every time brakes are (re)applied, so the deployed torque matches
-  --   training EXACTLY regardless of what the driver pedal is doing.
+  -- Forces input.brake = maxBrake so deployed torque matches training.
+  -- Without this, input.brake = 1.0 inflates every wheel by 1/maxBrake.
   -- ---------------------------------------------------------------------
   local maxBrake = math.max(cmd[1], cmd[2], cmd[3], cmd[4])
   if input then
@@ -764,21 +640,7 @@ local function onEngage()
   prevBrakeFR, prevBrakeFL, prevBrakeRR, prevBrakeRL = 0, 0, 0, 0
   hasPrevState = false
 
-  -- RESET the abstelemetry poll window so the FIRST active tick gets a clean,
-  -- braking-phase-only window — exactly like training. In abs_env the obs source
-  -- (readAll) was drained every step during accel AND once more (start_data) right
-  -- before the first braking step, and the car was already settled (throttle off ->
-  -- neutral -> det -> step) so the first window was tiny and decel-only. Here,
-  -- NOTHING drains abstelemetry's poll accumulators before engage (runTick only runs
-  -- while active), so without this the first window spans the accel->brake transition
-  -- and yields a huge NEGATIVE gy_avg/gy_min spike (speed still rising) that poisons
-  -- the 16-frame stack.
-  --
-  -- resetAccum() (vs a plain buildSensorData drain) ALSO sets physPrevSpeed = -1, so
-  -- the next onPhysicsStep re-seeds the speed baseline from the current (braking)
-  -- speed and the first accumulated window contains only post-engage deceleration —
-  -- this is what kills the first-tick spike. It also clears the brake-event state
-  -- machine + lastBrake* (unused in deploy: distance is measured Python-side).
+  -- Reset abstelemetry poll window so first active tick gets clean decel only.
   if haveTelem and extensions and extensions.abstelemetry
      and extensions.abstelemetry.resetAccum then
     pcall(extensions.abstelemetry.resetAccum)
@@ -793,11 +655,7 @@ local function onEngage()
   cmd[1] = WARMUP_BRAKE; cmd[2] = WARMUP_BRAKE
   cmd[3] = WARMUP_BRAKE; cmd[4] = WARMUP_BRAKE
 
-  -- EXT-MODE per-episode handshake reset. mlabs_tickseq is the env's warmup-done
-  -- signal (it checks mlabs_active==1 && mlabs_warmup==0 && mlabs_tickseq>=1), so
-  -- it MUST be 0 across the warmup ticks of every new episode. Also re-seed extCmd
-  -- to the gentle warmup brake and clear stale published seq/tickseq electrics so a
-  -- previous episode's values can never satisfy the env's detection early.
+  -- Ext-mode handshake reset: mlabs_tickseq must be 0 during warmup.
   extTickSeq    = 0
   extSeqApplied = 0
   extSeqPending = 0
@@ -825,15 +683,7 @@ local function runTick()
   local t0 = os.clock()
 
   -- ---- consume the EXACT producer of the training obs ----
-  -- buildSensorData() returns the raw Lua table (pre-JSON) that readAll() encodes
-  -- and that abs_env._build_obs_from_data() was fed once per step. It also RESETS
-  -- the poll-window accumulators, so this single call gives the "window since the
-  -- previous setBrakes" semantics that training relied on (we call it at the TOP
-  -- of the tick, before computing the new action).
-  --
-  -- HARD GUARD: if abstelemetry / buildSensorData is unavailable, fail loud and do
-  -- NOT write brakes this tick (weightsOk-style discipline — never feed the policy
-  -- a fabricated obs in closed loop).
+  -- Consume the exact training obs producer. Also resets poll accumulators.
   local data = nil
   if haveTelem and extensions and extensions.abstelemetry
      and extensions.abstelemetry.buildSensorData then
@@ -855,12 +705,7 @@ local function runTick()
   end
 
   -- ---- S1 warmup-drain: discard the first WARMUP_TICKS post-engage windows ----
-  -- buildSensorData() above already drained the poll accumulators for THIS window
-  -- (which spans the accel->brake transition on the very first tick). We throw that
-  -- obs away, re-arm resetAccum so the NEXT window seeds cleanly from the current
-  -- (now braking) speed, and let the stock full-torque pipeline keep braking this
-  -- tick. After WARMUP_TICKS the first window the policy sees is decel-only, in
-  -- distribution with training's post-handoff first frame.
+  -- Warmup drain: discard first WARMUP_TICKS windows, re-arm resetAccum.
   if pendingWarmup > 0 then
     pendingWarmup = pendingWarmup - 1
     if haveTelem and extensions and extensions.abstelemetry
@@ -886,12 +731,7 @@ local function runTick()
   pushStack()
 
   -- ---- EXT-MODE branch: Python mailboxes the action; NN forward is SKIPPED ----
-  -- Ordering (spec §1): buildSensorData (above) -> buildRawObsFromData -> pushStack
-  -- (above) -> publish obs + tickseq -> apply pending mailbox cmd. prev_brakes
-  -- phasing is IDENTICAL to NN mode: buildRawObsFromData already consumed
-  -- prevBrake* (= the previous tick's applied action) into obs[8..11]; we then
-  -- overwrite cmd with the mailboxed action and latch prevBrake* = cmd for the
-  -- NEXT tick. So obs(t) carries action(t-1) in both modes.
+  -- Ext-mode: publish obs before applying cmd. obs(t) carries action(t-1).
   if M.extMode then
     -- this is a real (post-warmup) tick: bump the monotonic tick counter FIRST so
     -- the env's published mlabs_tickseq reflects the obs it is about to read.
@@ -941,12 +781,7 @@ local function runTick()
   normalizeStack()
   forward()
 
-  -- Head applied AFTER the MLP, selected by the weights module's M.head field
-  -- (PPO_V2 deploy support, 2026-07-11):
-  --   "sac_tanh01" (default/legacy): a = 0.5*(tanh(mu)+1)   -> [0,1]
-  --   "ppo_clip01": a = clip(mu, 0, 1)  (PPO deterministic action = Gaussian mean,
-  --                 clipped to the Box(0,1) exactly as SB3 predict() does)
-  -- env brake mapping (both): brake = clamp(0.01 + 0.99*a, 0.01, 1.0).
+  -- Post-MLP head: sac_tanh01 or ppo_clip01, then brake = 0.01 + 0.99*a.
   local mu = actBuf[#W.layers]
   local headMode = W.head or "sac_tanh01"
   for j = 1, ACT_DIM do
@@ -991,7 +826,7 @@ end
 -- init
 -- =====================================================================
 local function init(jbeamData)
-  print("[MTB-ML-ABS] init — SAC ML ABS controller loading")
+  print("[MTB-ML-ABS] init, SAC ML ABS controller loading")
   -- Multi-model support: a jbeam part in MODEL_SLOT_TYPE can set
   -- {"weights": "mlabs_w_<run>"} to pick its own weights module. No override
   -- (nil) reproduces the original single-model default exactly.
@@ -1023,10 +858,7 @@ local function init(jbeamData)
   tickMsSum = 0
   tickMsCount = 0
 
-  -- EXT-MODE runtime state reset. M.extMode itself is left at its module default
-  -- (false) — teleport(reset=True) re-inits the controller and the env re-asserts
-  -- ext mode via setExtMode() afterward (spec §4). Here we only zero the per-tick
-  -- handshake counters + re-seed the mailbox to the gentle warmup brake.
+  -- Ext-mode counters reset. M.extMode re-asserted by env after teleport.
   extSeqPending = 0
   extSeqApplied = 0
   extTickSeq    = 0
@@ -1050,7 +882,7 @@ local function init(jbeamData)
   electrics.values.mlabs_tickseq = 0
   electrics.values.mlabs_heading = obj:getDirection() or 0
 
-  -- bring up the telemetry/actuation bridge (same as 1FEX) — LAST.
+  -- bring up the telemetry/actuation bridge (same as 1FEX), LAST.
   local okT = pcall(function() extensions.load('abstelemetry') end)
   haveTelem = okT and (extensions and extensions.abstelemetry ~= nil) or false
   if not haveTelem then
@@ -1060,7 +892,7 @@ end
 
 
 -- =====================================================================
--- update(dtPhys) — PHYSICS rate (~2000Hz). Self-subdivides to 200Hz.
+-- update(dtPhys), PHYSICS rate (~2000Hz). Self-subdivides to 200Hz.
 -- =====================================================================
 local function update(dtPhys)
   if dtPhys == nil or dtPhys <= 0 then return end
@@ -1072,11 +904,7 @@ local function update(dtPhys)
   end
 
   -- ---- body speed (for the engage/disengage state machine only) ----
-  -- The kinematic-g / gy_min / gy_max accumulators that used to live here are GONE:
-  -- those obs channels now come straight from abstelemetry.buildSensorData() (the
-  -- training producer), so re-deriving them here is both redundant and was the
-  -- source of the closed-loop divergence. We still need the body speed for the
-  -- engage threshold + near-stop disengage.
+  -- Obs channels now come from abstelemetry.buildSensorData().
   local speed = 0
   local vel = obj:getVelocity()
   if vel then
@@ -1087,10 +915,7 @@ local function update(dtPhys)
   end
 
   -- ---- engage / disengage state machine ----
-  -- Recover the TRUE driver pedal. While active we overwrite input.brake with
-  -- maxBrake, so a raw read no longer reflects the driver. If input.brake still
-  -- matches our last write, the driver hasn't changed it -> intent unchanged
-  -- (still held). If it differs, the driver/Python moved the pedal for real.
+  -- Recover true driver pedal (we overwrite input.brake while active).
   local rawBrake = (input and input.brake) or 0
   local driverBrake
   if active and lastWrittenBrake >= 0 and math.abs(rawBrake - lastWrittenBrake) < 1e-6 then
@@ -1127,13 +952,7 @@ local function update(dtPhys)
       runTick()
       timeAccum = timeAccum - TICK_STEP
     end
-    -- re-assert per-wheel brakes every physics step (survive stock overwrite),
-    -- exactly like abstelemetry.onPhysicsStep does. cmd[] holds either the ML action
-    -- (normal) or the gentle WARMUP_BRAKE (during the engage flush) — both must be
-    -- re-asserted every physics step so the stock pipeline doesn't reclaim full torque
-    -- and lock the fronts. runTick has set cmd[] on at least the first tick of either
-    -- phase before this runs. In ext-mode the policy runs Python-side (no weights
-    -- needed), so re-assert whenever weights are loaded OR ext-mode is active.
+    -- Re-assert per-wheel brakes every physics step (survive stock overwrite).
     if weightsOk or M.extMode then applyBrakesViaTelem() end
   end
 
@@ -1146,12 +965,7 @@ local function update(dtPhys)
   end
 
   -- ---- EXT-MODE per-physics-step status (spec §3) ----
-  -- Published EVERY physics step so the env can poll them without draining the
-  -- poll window: warmup flag (env's warmup-done gate), ext-mode flag (re-assert
-  -- check after teleport), and a NON-draining heading scalar matching exactly the
-  -- abstelemetry `heading` field (obj:getDirection() or 0) the env's crash
-  -- terminal compares against. These are cheap (one obj:getDirection() call) and
-  -- harmless when ext-mode is off, but only ext-mode/diagnostics read them.
+  -- Ext-mode status: warmup flag, heading for crash terminal.
   electrics.values.mlabs_warmup  = (pendingWarmup > 0) and 1 or 0
   electrics.values.mlabs_extmode = M.extMode and 1 or 0
   electrics.values.mlabs_heading = obj:getDirection() or 0

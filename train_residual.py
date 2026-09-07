@@ -3,7 +3,7 @@
 Trains against the deployment-clock in-car loop (ABSLearningEnvResidual): the
 controller is the sole obs-builder/actuator, this script only mailboxes actions
 and runs the SB3 update. No curriculum, no algorithm-specific replay-buffer or
-autocast optimizations -- plain SB3 SAC/PPO, matching the reference designs in
+autocast optimizations, plain SB3 SAC/PPO, matching the reference designs in
 TRAINING_GUI_SPEC.md.
 
 Sim guard: this project's beamngpy/BeamNG.tech pairing is pinned; a mismatched
@@ -12,7 +12,7 @@ beamngpy speaks a different wire protocol and fails the handshake outright.
 Graceful stop: create STOP_TRAINING.txt inside the run directory (or pass
 --stop-file);
 learn() exits cleanly and the finally block saves model + vecnorm + checkpoint.
-Never taskkill a run -- a hard kill can corrupt the replay buffer/optimizer state.
+Never taskkill a run, a hard kill can corrupt the replay buffer/optimizer state.
 
 Usage:
   python train_residual.py --algo sac --speeds "60,90,120" --pedal "0.4-1.0" \
@@ -30,7 +30,7 @@ import time
 import beamngpy
 
 # Real per-target compat check (compat.py, against the ACTUAL game version
-# pointed at by --game-folder) happens in make_venv() below, not here -- a
+# pointed at by --game-folder) happens in make_venv() below, not here, a
 # fixed constant can't know which game a universal tool is running against.
 _installed_version = beamngpy.__version__.strip()
 
@@ -77,7 +77,7 @@ PPO_DEFAULTS = dict(lr=1e-4, n_steps=2048, batch_size=512, n_epochs=10,
                     log_std_init=DEFAULT_LOG_STD_INIT)
 
 # net_arch/activation match the reference trainers exactly (train.py's
-# policy_kwargs for SAC, train_ppo_axle.py's for PPO) -- SB3's own defaults
+# policy_kwargs for SAC, train_ppo_axle.py's for PPO), SB3's own defaults
 # (64x64 tanh for PPO, 256x256 relu for SAC) are NOT these, and silently
 # training on the wrong network makes every result incomparable to the
 # reference runs this project's numbers are judged against.
@@ -88,7 +88,7 @@ POLICY_KWARGS_PPO = dict(activation_fn=th.nn.ReLU,
 
 
 def resolve_device(requested):
-    """None = auto (cuda if available, else cpu) -- picks whatever GPU index
+    """None = auto (cuda if available, else cpu), picks whatever GPU index
     0 is on this machine. An explicit "cuda:1"-style request always wins;
     there is no reference-machine-specific default here (that lived in the
     single-machine prototype, tuned to keep one particular GPU free)."""
@@ -142,14 +142,14 @@ class LogMirrorCallback(BaseCallback):
     """abs_env.py's episode CSV logger writes to a fixed path next to that file
     (computed from its own __file__, not configurable without editing the
     byte-identical copy), APPENDING across every process that ever uses this env
-    -- so the per-run log the GUI monitors is produced by periodically copying
+  , so the per-run log the GUI monitors is produced by periodically copying
     only the lines written since this run started, not the whole shared file
     (a whole-file copy would leak every prior run's/probe's episodes into this
     run's count and "best avg_g", which the monitor treats as ground truth)."""
 
     # 500 steps was ~half an episode when an episode was ~1084 steps. Under
     # free-running an episode is nearer 50, so 500 meant the per-run file did
-    # not appear until episode 10 and then jumped ten at a time -- the monitor
+    # not appear until episode 10 and then jumped ten at a time, the monitor
     # looked frozen because there was genuinely nothing to read. Mirroring on
     # episode end makes the cadence follow episodes rather than a step count
     # that no longer means the same thing in both modes.
@@ -300,7 +300,7 @@ def make_venv(args):
     # Pedal position keys a calibration row: the references are measured at a
     # specific pedal, and a half-pedal stop physically cannot reach the
     # full-pedal lockup floor. Scored against those anchors it lands far BELOW
-    # "locked wheels" however well it modulates -- indistinguishable from
+    # "locked wheels" however well it modulates, indistinguishable from
     # failing. So a normalized run needs a row per pedal level it can draw.
     pedal_spec = parse_pedal_spec(args.pedal)
     if spec.normalize and pedal_spec is not None:
@@ -310,7 +310,7 @@ def make_venv(args):
         if pedal_spec.needs_continuous_calibration and not table:
             raise SystemExit(
                 f"--pedal {args.pedal!r} draws continuously, which is "
-                f"{len(pedal_spec.levels())} distinct levels at 2 decimals -- each "
+                f"{len(pedal_spec.levels())} distinct levels at 2 decimals, each "
                 f"needs its own measured references (~7 min), so this cannot be "
                 f"calibrated.\n\n"
                 f'Use a list instead (e.g. --pedal "0.5,0.75,1.0") and calibrate '
@@ -341,7 +341,7 @@ def make_venv(args):
         forced = [float(x) for x in args.force_action.split(",")]
         if len(forced) != 2:
             raise SystemExit(f"--force-action needs 2 values, got {args.force_action!r}")
-        log.warning("FORCED ACTION %s -- the policy is overridden every step; "
+        log.warning("FORCED ACTION %s, the policy is overridden every step; "
                     "this is a diagnostic control run, not training", forced)
 
     def _make():
@@ -450,7 +450,7 @@ def load_resume(args, venv):
     if model.observation_space.shape != venv.observation_space.shape:
         raise RuntimeError(
             f"--resume checkpoint observation shape {model.observation_space.shape} "
-            f"does not match this run's env shape {venv.observation_space.shape} -- "
+            f"does not match this run's env shape {venv.observation_space.shape}, "
             f"refusing to resume onto a mismatched policy/env pair.")
     if args.algo == "ppo" and not has_bounded_action_interface(model):
         raise RuntimeError(
@@ -504,7 +504,7 @@ def parse_args():
     p.add_argument("--resume", default=None)
     p.add_argument("--stop-file", default=None,
                    help="graceful-stop marker (default: inside this run directory)")
-    # simulator config -- see sim_config.py; a settings.json (GUI-written or
+    # simulator config, see sim_config.py; a settings.json (GUI-written or
     # hand-edited) supplies defaults, these flags override individual fields
     p.add_argument("--settings", default=os.path.join(HERE, "settings.json"))
     p.add_argument("--game", choices=["tech", "drive"], default=None)
@@ -525,7 +525,7 @@ def parse_args():
     p.add_argument("--force-action", default=None,
                    help='override the policy every step, e.g. "0,0" for pure '
                         "slam (zero release = full pedal). Diagnostic control "
-                        "runs only -- the policy still trains on garbage.")
+                        "runs only, the policy still trains on garbage.")
     p.add_argument("--net-arch", default="3x256",
                    help='hidden layers of the policy/value networks: "3x256" '
                         'or "512,256,128". Default 3x256 matches the reference '
@@ -643,7 +643,7 @@ def main():
     src_log = os.path.join(HERE, "logs", "episode_log_env0.csv")
     dst_log = os.path.join(run_dir, "episode_log_env0.csv")
     # Lines already in the shared log before this run starts must be excluded from
-    # the per-run mirror -- the shared log is appended to by every process that
+    # the per-run mirror, the shared log is appended to by every process that
     # ever touches this env (other runs, baseline_probe.py, etc.).
     skip_lines = 0
     if os.path.exists(src_log):
@@ -665,7 +665,7 @@ def main():
                     reset_num_timesteps=(args.resume is None))
         log.info("learn() finished normally at %s steps in %.1fmin",
                  f"{model.num_timesteps:,}", (time.monotonic() - t0) / 60.0)
-    except BaseException as e:   # KeyboardInterrupt included -- we want it in the log
+    except BaseException as e:   # KeyboardInterrupt included, needs logging
         log.error("learn() aborted at %s steps after %.1fmin: %s: %s",
                   f"{model.num_timesteps:,}", (time.monotonic() - t0) / 60.0,
                   type(e).__name__, e, exc_info=True)

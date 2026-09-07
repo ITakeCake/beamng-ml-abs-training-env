@@ -1,13 +1,8 @@
 local M = {}
 M.type = "auxiliary"
 
--- Deployment controller for ABSCoSimEnv's exact policy contract:
---   100 Hz, MachineTrainerBoy 27 + 4 ABS-speed slips + 4 applied brake Nm, x 64 PAST frames (2240 inputs)
---   actions = front/rear RELEASE in [0,1]
---   brake fraction = max(0.01, 1-release), axle locked
--- It is intentionally separate from MTB-ML-ABS.lua. That controller runs the
--- historical 27x16 -> four-wheel-brake contract, and silently adapting either
--- network to the other would make a valid export control the wrong system.
+-- Deployment controller for the co-sim policy contract.
+-- 100 Hz, 35x64 obs, front/rear release in [0,1]. Separate from MTB-ML-ABS.lua.
 
 local GRAV = 9.81
 local OBS_DIM = 35
@@ -49,10 +44,7 @@ local prevWs = nil
 local prevPitch, prevRoll = 0, 0
 
 local wheelToBrakeMap = {3, 4, 1, 2}
--- abstelemetry publishes tel_ws_* from onGraphicsStep, so those samples are
--- GFX-rate and repeat for several control ticks (20 Hz under a raised physics
--- speed factor). Co-sim feeds a fresh value every period, so read the rotators
--- live instead: main.lua updates wd.wheelSpeed every physics step.
+-- Read live rotators instead of GFX-rate tel_ws_* (stale under speed factor).
 local liveWs = nil
 local origBrakeTorque = {}
 local wheelCount = 0
@@ -337,13 +329,8 @@ local function buildObservation(data)
   pushStack()
 end
 
--- A channel with no variance in training carries no information: the policy only
--- ever saw one value there, so its weights on it act purely as a bias. In the car
--- those channels DO move (throttle and steering are zero through every co-sim
--- approach, but a driver reaching 80 mph is on the throttle), and dividing the
--- deviation by sqrt(1e-8) multiplies it by ~9535 -- every such slot saturates at
--- the +-10 clip across the whole 64-frame history, corrupting exactly the first
--- 0.64 s of the stop. Emitting 0 reproduces what training actually fed the net.
+-- Zero-variance channels get emitted as 0. Dividing by sqrt(1e-8) would amplify
+-- any car-side deviation by 9535x, saturating the clip and corrupting the stack.
 local DEGENERATE_VAR = 1e-7
 
 local function forward()

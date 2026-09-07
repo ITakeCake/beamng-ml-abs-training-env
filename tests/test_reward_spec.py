@@ -3,7 +3,7 @@
 The reward only becomes user-editable once RewardSpec.v5() is proven to
 reproduce the protected abs_env.py's numbers exactly. These tests compare
 against the REAL constants and _terminal_g_shape imported from that file --
-not a recorded snapshot -- so if anyone ever edits the protected copy, or the
+not a recorded snapshot, so if anyone ever edits the protected copy, or the
 extraction drifts, this fails loudly instead of silently changing what every
 past result meant.
 """
@@ -56,7 +56,7 @@ def test_v5_g_shape_is_bit_identical_to_the_protected_shape(g):
 
 @pytest.mark.parametrize("g", G_GRID)
 def test_v5_per_step_g_reward_matches_the_env_formula(g):
-    # abs_env_incar.py:366 -- step_g_rew = PER_STEP_K * _terminal_g_shape(g)
+    # abs_env_incar.py:366, step_g_rew = PER_STEP_K * _terminal_g_shape(g)
     expected = abs_env.PER_STEP_K * _terminal_g_shape(g)
     assert RewardSpec.v5().step_g_reward(g) == expected
 
@@ -112,7 +112,7 @@ def test_normalized_scores_zero_at_stock_and_negative_at_lockup():
 
 def test_normalized_fixes_what_v5_got_wrong_on_the_measured_data():
     """The whole reason this preset exists: under v5.0 locking the wheels pays
-    +966 and the project's best result (1.043 g) pays +987 -- indistinguishable.
+    +966 and the project's best result (1.043 g) pays +987, indistinguishable.
     Normalized must separate them and put stock at zero."""
     v5, norm = RewardSpec.v5(), RewardSpec.normalized()
     slam_g, stock_g = REFS
@@ -139,7 +139,7 @@ def test_normalized_gatekeeper_fires_only_above_stock():
 
 def test_normalized_refuses_to_score_without_references():
     """Scoring a normalized spec against absolute anchors is precisely the bug
-    normalization exists to fix -- it must raise, never silently fall back."""
+    normalization exists to fix, it must raise, never silently fall back."""
     with pytest.raises(ValueError):
         RewardSpec.normalized().g_shape(1.0)
 

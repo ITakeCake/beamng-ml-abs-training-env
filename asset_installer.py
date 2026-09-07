@@ -1,5 +1,5 @@
 """Copies this project's shipped assets (assets/mods/mtb_ml_abs, assets/cars/*)
-into a chosen BeamNG userpath. Pure filesystem + hashing -- no game imports."""
+into a chosen BeamNG userpath. Pure filesystem + hashing, no game imports."""
 import hashlib
 import os
 import shutil
@@ -51,7 +51,7 @@ def installed_status(assets_dir, userpath):
 
 def install_assets(assets_dir, userpath):
     """Copies every shipped asset into userpath, overwriting anything that
-    differs (these are the tool's own managed files, not user data -- an
+    differs (these are the tool's own managed files, not user data, an
     intentional 'Install/Update' action, not a silent clobber of unrelated
     work). Returns [(rel_dest_path, "installed"|"updated"|"unchanged")]."""
     report = []

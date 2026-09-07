@@ -1,29 +1,6 @@
--- abstelemetry.lua v3.4-ppo_v2 — Telemetry bridge + per-wheel brake control + 2000Hz PD controller
--- (PPO_V2 changes vs v3.0: geometric wheel-order resolution [Dynamic_ABS parity],
---  measured steering [electrics.steering, Dynamic_ABS parity]. Gyro pitch/roll
---  estimate exists but is DEBUG-ONLY — obs pitch/roll are ground truth, reverted 2026-07-11)
---
--- ResidualABS-local copy: rebuilt 2026-08-27 on the PPO_V3_AxleCurriculum v3.4-ppo_v2
--- base (the copy the live .tech userpath has run since 07-11) + the arc-length brake
--- metric. An earlier rebuild used the older MachineTrainerBoy base and silently lost
--- the armBrakeSlam/reorderWheelDataLogical machinery abs_env_incar.py requires
--- (parked as abstelemetry_SACBASE_BAK.lua). Auto-deployed to the userpath by
--- abs_env.py's _install_tech_assets() on every launch from this folder; other
--- training folders carry their own copies and are unaffected by this one.
--- Arc fields (last_brake_avg_g_arc / last_brake_dist_arc) are telemetry-only —
--- not wired into any reward — and unverified live until an env from this folder
--- launches and logs a stop.
---
--- *** IMPORTANT: This file is the source of truth. ***
--- *** Python/ML code must adapt to this Lua, not the other way around. ***
--- *** Do not modify this file to accommodate Python-side changes. ***
---
--- v3.0 CHANGES:
---   Added optional PD brake controller running at 2000Hz physics rate.
---   Enabled via enablePDController(config). Particle filter (60Hz) feeds
---   the slip target via setOptimalSlip(). PD controller does speed estimation,
---   slip calculation, and per-wheel brake modulation at physics rate.
---   When PD is disabled, everything works exactly as v2.1 (ML training path).
+-- abstelemetry.lua v3.4-ppo_v2
+-- Telemetry bridge, per-wheel brake control, 2000 Hz PD controller.
+-- This file is the source of truth. Python adapts to this Lua.
 
 local M = {}
 
@@ -36,17 +13,10 @@ local simTime = 0
 local perWheelMode = false
 local brakeCmd = {0, 0, 0, 0}  -- FR, FL, RR, RL
 local origBrakeTorque = {}
--- wheelData: 1=RR, 2=RL, 3=FR, 4=FL  — GUARANTEED by reorderWheelDataLogical()
--- (PPO_V2: stock-geometry classification, same method as Dynamic_ABS buildWheelMaps;
--- previously this order was just assumed from the etk800's physical rotator order)
--- brakeCmd:  1=FR, 2=FL, 3=RR, 4=RL
+-- wheelData: 1=RR 2=RL 3=FR 4=FL. brakeCmd: 1=FR 2=FL 3=RR 4=RL.
 local wheelToBrakeMap = {3, 4, 1, 2}
 
--- (PPO_V2) IMU-style attitude estimate: pure body-gyro integration
--- (obj:getPitchAngularVelocity / getRollAngularVelocity), zeroed by resetAccum() at
--- each brake-event arm. DEBUG-ONLY as of 2026-07-11 (published as pitch_gyro/
--- roll_gyro + tel_imu_*): the obs pitch/roll reverted to ground-truth orientation
--- per Blake ("for now"). Flip the two blocks in buildSensorData to re-enable.
+-- IMU attitude: gyro integration, zeroed per brake event. Debug only.
 local imuPitch, imuRoll = 0, 0
 
 -- Per-wheel min speed accumulators
@@ -67,7 +37,7 @@ local pollGyRollingSize = 6  -- ~3ms at 2000Hz
 local pollGySmoothedMin = 999999
 local pollGySmoothedMax = -999999
 
--- gx (lateral) and gz (vertical) windowing — mirrors gy pattern
+-- gx (lateral) and gz (vertical) windowing, mirrors gy pattern
 -- Sourced from IMU sensorX/sensorZ at 2000Hz. Used by SpeedLSTM data export.
 local pollGxRollingBuf = {}
 local pollGxRollingIdx = 0
@@ -97,20 +67,14 @@ local gfxGySum = 0
 local gfxGyCount = 0
 
 -- =====================================================
--- MODE 2: Brake event — exact copy of BeamNG's
--- updateBrakingDistance() from wheels.lua
--- 3-state: idle → waiting → measuring → idle
--- Python sets targetSpeed via setTargetSpeed(ms).
+-- Brake metric: mirrors updateBrakingDistance() from wheels.lua.
 -- =====================================================
 local brakeState = "idle"
 local brakeTargetSpeed = 0     -- m/s, set by Python via setTargetSpeed()
 local brakeStartPosition = nil
 local brakeStartTime = 0
 
--- Arc-length accumulator (path distance, not straight-line chord): a policy that
--- yaws while braking shortens the chord below the true path length, which
--- inflates chord-based avg-G. Accumulated every physics tick while measuring;
--- reward code should use min(chord_g, arc_g) once wired to a reward that reads it.
+-- Arc-length accumulator. Yaw shortens chord below true path, inflating g.
 local brakeArcDist = 0
 local brakePrevPos = nil
 
@@ -124,7 +88,7 @@ local lastBrakeStartSpeed = 0 -- m/s (= targetSpeed, the measurement start)
 local lastBrakeDuration = 0   -- seconds
 
 -- =====================================================
--- PD CONTROLLER (2000Hz) — optional, enabled by particle ABS
+-- PD CONTROLLER (2000Hz), optional, enabled by particle ABS
 -- When disabled, this entire section is skipped.
 -- =====================================================
 local pdEnabled = false
@@ -154,21 +118,9 @@ local pdWheelSlips = {0, 0, 0, 0}
 local pdLockupTriggered = {false, false, false, false}
 
 -- =====================================================
--- FUSED SPEED ESTIMATOR (2000Hz) — for threshold ABS
--- Wheel-speed average when wheels are trustworthy,
--- raw sensorY integration when they're all locking.
--- Policy (decel filter) pushed in by the ABS module.
+-- FUSED SPEED ESTIMATOR (2000 Hz), for threshold ABS.
 -- =====================================================
--- All fused-speed state packed in a single table to stay under Lua's 60-upvalue
--- limit per function. onPhysicsStep already closes over ~50 module-locals.
---
--- Fusion model (v2): integrator as dead-reckoning floor.
---   * Integrator runs every physics tick: speed -= sensorY * dt
---   * During braking: wheels can only pull integrator UP (lockup protection)
---   * During non-braking: wheels are authoritative, integrator re-syncs to them
---   * Output = integrator
--- This avoids the cascade where locked-at-zero wheels pass the decel filter
--- (because their tick-to-tick delta is near zero) and drag carSpeed to garbage.
+-- Packed in one table for upvalue budget. Integrator floor, wheels pull UP only.
 local fused = {
   decelFilter = -0.001,       -- overridden by setDecelFilter (tunable from ABS)
   speed = 0,                   -- output: fused car speed (m/s)
@@ -185,11 +137,7 @@ local fused = {
 }
 
 
--- (PPO_V2) Reorder wheelData into LOGICAL order {1=RR, 2=RL, 3=FR, 4=FL} using the
--- stock geometric method — 1:1 port of Dynamic_ABS's buildWheelMaps() (itself a copy
--- of drivingDynamics/sensors/vehicleData.lua -> initSecondStage()). This removes the
--- silent assumption that the jbeam's physical rotator order is RR,RL,FR,FL (true for
--- the etk800, NOT guaranteed for other cars). On failure keeps physical order + warns.
+-- Reorder wheelData to {1=RR 2=RL 3=FR 4=FL} by geometry, not jbeam order.
 local function reorderWheelDataLogical()
   if #wheelData ~= 4 then return end  -- only meaningful for 4-corner cars
   local ok, err = pcall(function()
@@ -244,7 +192,7 @@ local function reorderWheelDataLogical()
   end)
   if not ok then
     print("=== TELEMETRY WARNING: logical wheel reorder FAILED (" .. tostring(err)
-      .. ") — keeping physical rotator order; VERIFY it is RR,RL,FR,FL for this car! ===")
+      .. "), keeping physical rotator order; VERIFY it is RR,RL,FR,FL for this car! ===")
   end
 end
 
@@ -346,7 +294,7 @@ local function applyPerWheelBrakes()
 end
 
 -- =====================================================
--- setBrakes(fr, fl, rr, rl) — called from Python/ML
+-- setBrakes(fr, fl, rr, rl), called from Python/ML
 -- NOT used when PD controller is active.
 -- =====================================================
 local function setBrakes(fr, fl, rr, rl)
@@ -390,7 +338,7 @@ local function resetAccum()
   for i = 1, #wheelData do
     accumWsMin[i] = 999999
   end
-  imuPitch = 0; imuRoll = 0  -- (PPO_V2) re-zero the gyro-integrated attitude per brake event
+  imuPitch = 0; imuRoll = 0
   brakeState = "idle"
   brakeStartPosition = nil; brakeStartTime = 0
   lastBrakeAvgGy = 0; lastBrakeAvgG = 0; lastBrakeAvgGArc = 0; lastBrakeDist = 0; lastBrakeDistArc = 0; brakeArcDist = 0; brakePrevPos = nil
@@ -411,7 +359,7 @@ end
 
 
 -- =====================================================
--- PD CONTROLLER API — called by pacejka_particle_abs
+-- PD CONTROLLER API, called by pacejka_particle_abs
 -- =====================================================
 local function enablePDController(config)
   config = config or {}
@@ -446,7 +394,7 @@ local function setOptimalSlip(slip)
 end
 
 -- =====================================================
--- FUSED SPEED API — called by threshold ABS module
+-- FUSED SPEED API, called by threshold ABS module
 -- =====================================================
 local function setDecelFilter(value)
   fused.decelFilter = value or -0.001
@@ -472,11 +420,7 @@ end
 
 
 -- =====================================================
--- onPhysicsStep helpers — extracted to keep onPhysicsStep
--- under Lua's hard 60-upvalue-per-function limit (BeamNG.tech).
--- Per-tick computed values are passed as ARGUMENTS so they do
--- not count as upvalues; module-local accumulators stay at
--- module scope and are read/written here as shared upvalues.
+-- onPhysicsStep helpers (extracted for upvalue budget).
 -- =====================================================
 
 -- Poll + per-frame accumulators (gx/gy/gz rolling windows, yaw, gfx peak/avg).
@@ -541,11 +485,7 @@ local function updatePollAccumulators(substepDecel, sensorX, sensorZ, yawRate, d
   pollYawSum = pollYawSum + yawRate
   pollYawAbsSum = pollYawAbsSum + math.abs(yawRate)
 
-  -- (PPO_V2) IMU attitude: integrate body gyro rates at 2000Hz. Same API family
-  -- as the yaw channel (obj:get*AngularVelocity — see BeamNG's own
-  -- tech/cosimulationCoupling.lua). Zeroed at each brake-event arm (resetAccum),
-  -- so pitch/roll are "attitude change since arm" — exactly what a production
-  -- gyro cluster can honestly know short-horizon (no ground-truth orientation).
+  -- IMU attitude: integrate body gyro at 2000 Hz, zeroed per brake event.
   local gyroPitchRate, gyroRollRate = 0, 0
   pcall(function()
     gyroPitchRate = obj:getPitchAngularVelocity() or 0
@@ -559,7 +499,7 @@ end
 
 
 -- =====================================================
--- FUSED SPEED ESTIMATOR at 2000Hz — integrator-floor model
+-- FUSED SPEED ESTIMATOR at 2000Hz, integrator-floor model
 -- Consumed by threshold ABS via electrics.values.tel_fused_speed
 -- Extracted verbatim from onPhysicsStep.
 -- =====================================================
@@ -615,22 +555,14 @@ local function updateFusedSpeed(dtPhys)
     fused.integratedSpeed = math.max(0, fused.integratedSpeed - longAccel * dtPhys * fused.accSign)
     fused.lastSensorY = longAccel
 
-    -- 4. Anchor integrator based on brake state.
-    --    During braking: integrator is AUTHORITATIVE. Wheels can ONLY pull up
-    --    (never down), because every wheel reads BELOW truth during braking
-    --    due to slip — syncing down to max wheel bakes slip bias into the
-    --    estimate, which compounds into the big drift we saw in the old log.
-    --    Upward pull is still allowed so that sensor positive-bias drift
-    --    gets corrected when a wheel legitimately reads higher than integrator.
-    --    Downward correction of any accelerometer drift only happens at
-    --    brake release (non-braking branch).
+    -- Braking: integrator authoritative, wheels only pull UP (slip bias).
     if isBraking then
       if maxWsAll > fused.integratedSpeed then
         fused.integratedSpeed = maxWsAll  -- recovery / anti-drift upward
       end
       -- else: integrator runs pure on sensorY. Max drift per brake event ≈
       -- sensor bias × duration. For a 5s hard brake with 0.5 m/s² bias that's
-      -- 2.5 m/s — much smaller than the wheel-slip bias we were absorbing.
+      -- 2.5 m/s, much smaller than the wheel-slip bias we were absorbing.
     else
       -- Non-braking: wheels are authoritative, re-sync integrator to avg of good wheels.
       -- This kills any accelerometer drift that accumulated during the brake event.
@@ -723,7 +655,7 @@ local function updatePDController(dtPhys, substepDecel, brakeInput)
     pdAbsActive = brakeInput > 0
     pdHandedOff = false
 
-    -- Slip ratios — no speed gate, calculate always
+    -- Slip ratios, no speed gate, calculate always
     for w = 1, #wheelData do
       if pdCarSpeed > 0.01 then
         pdWheelSlips[w] = math.max(0, math.min((pdCarSpeed - math.abs(ws[w])) / pdCarSpeed, 1.0))
@@ -782,22 +714,14 @@ end
 
 
 -- =====================================================
--- onPhysicsStep(dtPhys) — ~2000Hz
+-- onPhysicsStep(dtPhys), ~2000Hz
 -- =====================================================
 -- =====================================================
--- (PPO_V2) ARMED 2kHz BRAKE SLAM — exact-speed brake onset.
--- Python arms a target via armBrakeSlam(ms). Every physics tick (0.5ms) the check
--- below compares the TRUE speed (instSpeed = obj:getVelocity():length() — the SAME
--- signal the standard brake metric uses) and latches input.brake=1 from the exact
--- tick of the crossing. Replaces the Python coast loop's ~50Hz wall-clock poll of
--- stale electrics (onset could land tenths of a mph late). The latch re-asserts
--- every tick until disarmBrakeSlam() so the pedal cannot drop between writes.
+-- =====================================================
+-- ARMED 2 kHz BRAKE SLAM. Latches input.brake at the exact speed crossing.
+-- =====================================================
 -- =====================================================
 local slamArmTarget = nil
--- Pedal position the latch holds once it fires. 1 = floored, which is what
--- training always uses; the reference runner sets it lower to measure a
--- part-pedal stop. Held in Lua because the latch re-asserts every 0.5 ms tick
--- and would otherwise stamp full pedal over whatever Python sent.
 local slamPedal = 1
 local slamFired = false
 
@@ -819,11 +743,9 @@ local function disarmBrakeSlam()
 end
 
 -- =====================================================
--- (COSIM) 2 kHz accelerated-run-up handoff.
--- Python polling is intentionally not responsible for the cutoff: at a 4x+
--- physics factor, one graphics/poll interval can cover a large speed change.
--- This latch catches the rising-speed crossing on the physics tick and holds
--- throttle at zero until Python has acknowledged restoring real time.
+-- =====================================================
+-- Run-up handoff. Catches the speed crossing at physics rate.
+-- =====================================================
 -- =====================================================
 local runupHandoff = {target = nil, fired = false}
 
@@ -859,19 +781,8 @@ end
 
 -- =====================================================
 -- TIRE GRIP CONTROL
--- Changes the TIRE's friction, not the ground surface: the same mechanism
--- BeamNG's own tire-damage code uses (beamstate.lua:549-557) --
--- obj:setNodeFrictionSlidingCoefs on each wheel's treadNodes. Applied evenly
--- to every wheel (this is "different tires", not split-mu).
---
--- The multiplier is ALWAYS applied against v.data.nodes -- the untouched jbeam
--- values -- never against the current coefficients, so repeated calls cannot
--- compound and restoring is exactly applyGripMultiplier(1.0).
---
--- Timing: the change is armed and fires at brake onset, so the acceleration
--- and coast-down approach always happen at stock grip (a low-grip approach
--- would spin the wheels and never reach the target speed) and only the
--- braking phase sees the new value.
+-- Scales tire friction via setNodeFrictionSlidingCoefs.
+-- Always applied against jbeam defaults, never current values.
 -- =====================================================
 local gripMultCurrent = 1.0
 local gripPendingMult = nil
@@ -974,11 +885,7 @@ end
 
 
 -- =====================================================
--- 100 Hz policy-window stats, published EVERY physics tick as electrics so the
--- co-sim "To" packet and the in-car controller read identical, past-only
--- values: the last WIN_N ticks ending at the current one. Mirrors the
--- MachineTrainerBoy readAll() window (gy_avg from speed delta, min/max of the
--- SM_N-tick smoothed decel, mean yaw rate).
+-- Deferred grip change: fires at brake onset, or leadSeconds earlier.
 -- =====================================================
 local WIN_N = 20        -- 20 ticks at 2000 Hz = one 100 Hz policy period
 local SM_N = 6          -- same smoothing length as the poll min/max
@@ -1086,7 +993,7 @@ local function onPhysicsStep(dtPhys)
   updateWindowStats(speed, substepDecel, yawRate, dtPhys)
 
   -- =====================================================
-  -- FUSED SPEED ESTIMATOR at 2000Hz — integrator-floor model
+  -- FUSED SPEED ESTIMATOR at 2000Hz, integrator-floor model
   -- Consumed by threshold ABS via electrics.values.tel_fused_speed
   -- (extracted to helper for upvalue budget)
   -- =====================================================
@@ -1096,7 +1003,7 @@ local function onPhysicsStep(dtPhys)
   -- restores real time, disarms this latch, and completes the final speed band.
   updateRunupHandoff()
 
-  -- (PPO_V2) armed 2kHz slam — MUST run before the brake SM reads input.brake so
+  -- (PPO_V2) armed 2kHz slam, MUST run before the brake SM reads input.brake so
   -- the SM arms on the very tick the pedal latches at the target crossing.
   updateArmedSlam()
 
@@ -1108,10 +1015,8 @@ local function onPhysicsStep(dtPhys)
   -- rather than electrics.values.airspeed which lags at speed_factor > 1.
   local airspeed = instSpeed
 
-  -- v3.2: threshold lowered from 0.01 to 0.001 to play nice with Python's
-  -- 0.01 brake floor. Now only resets the state machine if brakes are
-  -- effectively fully released (sub-1%), preventing measurement loss when
-  -- the model briefly modulates near zero during real-ABS-style control.
+  -- === INSTANTANEOUS TO ELECTRICS ===
+  -- Physics-rate speed. electrics.airspeed lags under speed factor > 1.
   if brakeInput < 0.001 then
     brakeState = "idle"
   end
@@ -1170,7 +1075,7 @@ end
 
 
 -- =====================================================
--- updateGFX(dtSim) — ~60Hz
+-- updateGFX(dtSim), ~60Hz
 -- =====================================================
 local function onGraphicsStep(dtSim)
   if not initialized then
@@ -1201,11 +1106,7 @@ local function onGraphicsStep(dtSim)
   end
 
   -- === INSTANTANEOUS TO ELECTRICS ===
-  -- Physics-rate speed (obj:getVelocity():length(), recomputed every
-  -- onPhysicsStep). electrics.values.airspeed is GFX-rate and LAGS whenever
-  -- physics outruns graphics -- which is exactly what happens under
-  -- be:setPhysicsSpeedFactor(N>1), so anything pacing a run-up or a coast has
-  -- to read this instead.
+    -- pitch/roll: ground-truth orientation. Gyro estimate is debug only.
   electrics.values.tel_inst_speed = instSpeed
   electrics.values.tel_gy_inst = instGy
   electrics.values.tel_gx_inst = instGx
@@ -1265,7 +1166,7 @@ end
 
 
 -- =====================================================
--- buildSensorData() — all data Python needs
+-- buildSensorData(), all data Python needs
 -- =====================================================
 local function buildSensorData()
   local pollAvgGy = 0
@@ -1312,7 +1213,7 @@ local function buildSensorData()
     -- Real-car sensors added 2026-05-02 for slip-removed PPO retrain (Rule 1 compliance)
     rpm = electrics.values.rpm or 0,
     gear = electrics.values.gearIndex or electrics.values.gear or 0,
-    -- (PPO_V2) measured steering-wheel angle (deg) — SAME channel Dynamic_ABS reads
+    -- (PPO_V2) measured steering-wheel angle (deg), SAME channel Dynamic_ABS reads
     -- (electrics.values.steering); the old normalized driver input stays as debug.
     steering = electrics.values.steering or 0,
     steering_input = electrics.values.steering_input or 0,
@@ -1327,7 +1228,7 @@ local function buildSensorData()
     gz_min = pollGzSmoothedMin ~= 999999 and pollGzSmoothedMin or 0,
     gz_max = pollGzSmoothedMax ~= -999999 and pollGzSmoothedMax or 0,
     -- pitch/roll: ground-truth orientation (gyro-estimate experiment REVERTED
-    -- 2026-07-11 per Blake — "for now". The gyro-integrated values stay published
+    -- 2026-07-11 per Blake, "for now". The gyro-integrated values stay published
     -- as pitch_gyro/roll_gyro DEBUG channels only, never fed to the model).
     pitch = (function()
       local d = obj:getDirectionVector()

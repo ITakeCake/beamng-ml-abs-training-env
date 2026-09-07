@@ -1,5 +1,5 @@
 """model_registry lists finished training runs (runs/<name>/final.zip) with
-enough metadata to export -- no game or SB3 imports, pure filesystem/text
+enough metadata to export, no game or SB3 imports, pure filesystem/text
 parsing so it's fast and testable offline."""
 import os
 import json

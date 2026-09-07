@@ -45,7 +45,7 @@ CUSTOM_TRIM_LABEL = "Custom..."
 
 SETTINGS_PATH = os.path.join(HERE, "settings.json")
 # Separate from settings.json, which holds the simulator config and is read
-# by train_residual.py at launch -- the GUI's own field memory has no
+# by train_residual.py at launch, the GUI's own field memory has no
 # business in a file another process parses.
 GUI_STATE_PATH = os.path.join(HERE, "gui_state.json")
 ASSETS_DIR = os.path.join(HERE, "assets")
@@ -104,14 +104,14 @@ class ResidualTrainerGUI:
         self.proc = None
         self._monitor = None
         self.field_vars = {}
-        self._active_run = None          # run name of the process we launched
+        self._active_run = None          # run name of the spawned process
         self._log_seen = False           # per-run log-file-appeared transition
         self._last_parse_err = None      # dedupe repeating monitor parse errors
         self._active_backend = None
         self._residual_only_rows = []
         self._settings_backend = None
-        # tkinter swallows exceptions raised inside callbacks -- sys.excepthook
-        # never sees them -- so route them into gui.log explicitly.
+        # tkinter swallows exceptions raised inside callbacks, sys.excepthook
+        # never sees them, so route them into gui.log explicitly.
         root.report_callback_exception = self._tk_exception
 
         self.state = gui_state.load(GUI_STATE_PATH)
@@ -284,7 +284,7 @@ class ResidualTrainerGUI:
         cbd.pack(side="left")
         gui_help.attach(cbd, None, "deterministic")
         # Built once and packed/forgotten, rather than created on demand: a
-        # rebuilt widget loses the value the user typed into it.
+        # rebuilt widget loses the value was typed into it.
         self.freerun_frame = ttk.Frame(row_det)
         ttk.Label(self.freerun_frame, text="Engine speed:").pack(side="left",
                                                                  padx=(12, 0))
@@ -363,7 +363,7 @@ class ResidualTrainerGUI:
         # Row 7: monitor
         row7 = ttk.LabelFrame(root, text="Monitor")
         row7.pack(fill="x", **pad)
-        self.monitor_var = tk.StringVar(value="episodes: -- | rolling-20 avg_g: -- | best avg_g: -- | last outcome: --")
+        self.monitor_var = tk.StringVar(value="episodes:, | rolling-20 avg_g:, | best avg_g:, | last outcome: --")
         ttk.Label(row7, textvariable=self.monitor_var).pack(side="left", padx=6, pady=4)
 
         self._sync_backend()
@@ -372,7 +372,7 @@ class ResidualTrainerGUI:
 
     def _open_monitor(self, settings=None):
         """Show the live monitor for the current run, reusing the window if one
-        is already open -- a second Toplevel would poll the same file twice and
+        is already open, a second Toplevel would poll the same file twice and
         leave the user guessing which is current."""
         try:
             total = int(str((settings or self._collect_settings())["total_steps"]))
@@ -501,7 +501,7 @@ class ResidualTrainerGUI:
         row = ttk.Frame(t); row.pack(fill="x", **pad)
         self.sim_headless_var = tk.BooleanVar(value=cfg.headless)
         self.sim_headless_check = ttk.Checkbutton(
-            row, text="Headless (no window, no GPU rendering -- BeamNG.tech only)",
+            row, text="Headless (no window, no GPU rendering, BeamNG.tech only)",
             variable=self.sim_headless_var)
         self.sim_headless_check.pack(side="left")
 
@@ -630,7 +630,7 @@ class ResidualTrainerGUI:
         save_sim_config(cfg, SETTINGS_PATH)
         log.info("simulator settings saved: %s (problems=%s)", cfg, problems)
         if problems:
-            self.sim_status_var.set("saved, with issues -- see below")
+            self.sim_status_var.set("saved, with issues, see below")
             messagebox.showwarning("Simulator settings saved, with issues",
                                    "\n".join(problems))
         else:
@@ -693,7 +693,7 @@ class ResidualTrainerGUI:
         self.car_model_combo["values"] = sorted(self._car_model_by_display)
         if self.car_model_var.get() not in self._car_model_by_display and models:
             # Only fall back when the remembered model is genuinely gone (a
-            # different install, a removed car) -- otherwise the restored
+            # different install, a removed car), otherwise the restored
             # selection would be overwritten on every startup.
             self.car_model_var.set(sorted(self._car_model_by_display)[0])
         self._on_car_model_changed()
@@ -755,7 +755,7 @@ class ResidualTrainerGUI:
                 model.name, trim.pc_name)
         if model.name not in SUPPORTED_ML_ABS_MODELS:
             self.car_warning_var.set(
-                f"No ML-ABS part ships for {model.name} yet -- only "
+                f"No ML-ABS part ships for {model.name} yet, only "
                 f"{', '.join(sorted(SUPPORTED_ML_ABS_MODELS))} is currently supported.")
         else:
             self.car_warning_var.set("")
@@ -863,7 +863,7 @@ class ResidualTrainerGUI:
 
     def save_state(self):
         """Write the Training tab down. Called on START, on CALIBRATE and on
-        close -- cheap enough to do often, and doing it on launch means a run
+        close, cheap enough to do often, and doing it on launch means a run
         that crashes still leaves its settings behind."""
         values = {
             "backend": self.backend_var.get(),
@@ -924,7 +924,7 @@ class ResidualTrainerGUI:
 
     def _swap_algo_panel(self):
         # Whatever is on screen belongs to the algorithm that WAS selected, so
-        # bank it before rebuilding -- otherwise switching to the other
+        # bank it before rebuilding, otherwise switching to the other
         # algorithm and back silently restores defaults over tuned values.
         if self.field_vars and getattr(self, "_panel_state_key", None):
             gui_state.remember_algo(self.state, self._panel_state_key,
@@ -1175,7 +1175,7 @@ class ResidualTrainerGUI:
 
         Training spawns the car, slams the brakes, and waits for the ML ABS
         controller to report in. A .pc without that part never reports, so the
-        wait times out with "active=None" -- an error naming the symptom, two
+        wait times out with "active=None", an error naming the symptom, two
         minutes after the game booted. Reading the .pc costs nothing and says
         what is actually wrong."""
         for root in (os.path.join(ASSETS_DIR, "cars", model_name),
@@ -1185,7 +1185,7 @@ class ResidualTrainerGUI:
                                 else pc_name + ".pc")
             if os.path.isfile(path):
                 return check_ml_abs_car(path)
-        return None      # not found locally -- let the trainer be the judge
+        return None      # not found locally, let the trainer be the judge
 
     def calibrate(self):
         """Measure the slam/stock references for the configuration currently set
@@ -1212,7 +1212,7 @@ class ResidualTrainerGUI:
             log.warning("CALIBRATE refused: no car model selected")
             messagebox.showerror(
                 "No car selected",
-                "Pick a car model first -- calibration is measured per car and "
+                "Pick a car model first, calibration is measured per car and "
                 "written to calibration/<model>.json.")
             return
 
@@ -1245,13 +1245,13 @@ class ResidualTrainerGUI:
                 f"{planned} stops in total, measured {regime}.{mixed}\n\n"
                 f"This drives the car repeatedly (a "
                 f"corner also seeks its steering angle first). Results are cached "
-                f"in calibration/{model}.json -- it only needs running once per "
+                f"in calibration/{model}.json, it only needs running once per "
                 f"configuration.\n\nStart?"):
             log.info("calibration cancelled by user")
             return
 
         # No console: progress comes from the log, which the runner writes
-        # anyway, so a black window full of beamngpy chatter tells the user
+        # anyway, so a black window full of beamngpy chatter signals
         # nothing they cannot see better in the bar below.
         creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         log_path = os.path.join(HERE, "logs", "calibration.log")
@@ -1337,7 +1337,7 @@ class ResidualTrainerGUI:
         btns = ttk.Frame(win)
         btns.pack(fill="x", side="bottom", **pad)
         # Calibration has no graceful-stop file, so cancelling really does mean
-        # killing it. Rows already written to the table survive -- put() saves
+        # killing it. Rows already written to the table survive, put() saves
         # per row, so a cancelled run keeps what it measured.
         ttk.Button(btns, text="Cancel",
                    command=lambda: self._cancel_calibration(proc, win)).pack(side="right")
@@ -1353,8 +1353,8 @@ class ResidualTrainerGUI:
     def _cancel_calibration(self, proc, win):
         if not messagebox.askyesno(
                 "Cancel calibration",
-                "Stop the calibration run?\n\nRows already measured are kept -- "
-                "the table is written after each one -- so cancelling loses only "
+                "Stop the calibration run?\n\nRows already measured are kept, "
+                "the table is written after each one, so cancelling loses only "
                 "the configuration currently being measured."):
             return
         try:
@@ -1394,14 +1394,14 @@ class ResidualTrainerGUI:
 
         if prog["finished"]:
             st["bar"]["value"] = st["planned"]
-            st["status"].set(f"done -- {prog['stops_done']} stops measured")
+            st["status"].set(f"done, {prog['stops_done']} stops measured")
             self.status_var.set(f"calibration finished ({st['car']})")
             log.info("calibration finished: %s stops, wrote %s",
                      prog["stops_done"], prog["out_path"])
             self._refresh_output_models()
         else:
             why = prog["failed"][1] if prog["failed"] else "see logs\\calibration.log"
-            st["status"].set("FAILED -- " + str(why)[:120])
+            st["status"].set("FAILED, " + str(why)[:120])
             self.status_var.set("calibration failed")
             log.error("calibration failed: %s", why)
         self._calibration = None
@@ -1420,7 +1420,7 @@ class ResidualTrainerGUI:
             fh.write("stop")
         log.info("GRACEFUL STOP pressed: wrote %s (trainer pid=%s)",
                  stop_path, self.proc.pid if self.proc else None)
-        self.status_var.set("stop requested -- waiting for graceful save")
+        self.status_var.set("stop requested, waiting for graceful save")
 
     def _on_trainer_exit(self, code):
         run_name = self._active_run

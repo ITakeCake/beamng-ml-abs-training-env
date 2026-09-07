@@ -1,7 +1,7 @@
 """beamngpy <-> BeamNG.tech/.drive version compatibility, per BeamNGpy's own
 published table (https://github.com/BeamNG/BeamNGpy/blob/master/COMPATIBILITY.md,
 fetched 2026-08-29). Replaces a hard version-mismatch refusal with a warning +
-fix command -- a version pin tuned for one machine has no business hard-failing
+fix command, a version pin tuned for one machine has no business hard-failing
 on someone else's, especially as new BeamNG/beamngpy releases ship."""
 import dataclasses
 import re
@@ -32,7 +32,7 @@ TABLE = {
 
 @dataclasses.dataclass
 class CompatResult:
-    ok: object              # True / False / None (None = can't tell -- unknown game version)
+    ok: object              # True / False / None (None = can't tell, unknown game version)
     required: str = None    # beamngpy version the table says this game needs
     message: str = ""
     fix_command: str = ""
@@ -45,7 +45,7 @@ def _major_minor(version):
 
 def required_beamngpy(game_version):
     """None if this game version isn't in the table (newer than our last
-    fetch, or a dev build) -- callers must treat that as 'unknown', not
+    fetch, or a dev build), callers must treat that as 'unknown', not
     'incompatible'."""
     return TABLE.get(_major_minor(game_version))
 
@@ -61,7 +61,7 @@ def check_compat(game_version, beamngpy_version):
         return CompatResult(
             ok=None, required=required,
             message=f"Game version unknown or not in BeamNGpy's compatibility "
-                    f"table (detected: {game_version!r}) -- can't confirm "
+                    f"table (detected: {game_version!r}), can't confirm "
                     f"beamngpy {beamngpy_version} is right for it. Check "
                     f"https://github.com/BeamNG/BeamNGpy/blob/master/COMPATIBILITY.md "
                     f"and proceed at your own risk.")

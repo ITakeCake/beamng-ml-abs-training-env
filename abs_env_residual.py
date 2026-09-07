@@ -1,4 +1,4 @@
-"""Residual (release-from-pedal) in-car ABS env — TRAINING_GUI_SPEC.md design.
+"""Residual (release-from-pedal) in-car ABS env, TRAINING_GUI_SPEC.md design.
 
 Action (2 floats, Box[0,1]): [front_release, rear_release]. zero action = full-pedal
 slam = the lockup baseline; the model learns WHEN/HOW MUCH to release. Axle-locked
@@ -14,11 +14,11 @@ Driver-pedal note (verified against controller_reference/MTB-ML-ABS.lua:694-712)
 the in-car controller force-overwrites input.brake with maxBrake(extCmd) every
 tick it applies brakes ("regardless of what the driver pedal is doing"), so the
 literal value the parent's step()/reset() pass to vehicle.control(brake=...) has
-NO effect on wheel torque -- actual per-wheel torque is driven entirely by the
+NO effect on wheel torque, actual per-wheel torque is driven entirely by the
 mailboxed setExtCmd values, which is exactly what residual_to_brakes()'s output
 becomes after inversion below. The parent's hardcoded vehicle.control(brake=1.0)
 calls only matter for the engage/disengage state machine (driverBrakeHeld), whose
-"stay held" threshold is 0.05 -- comfortably satisfied by the parent's own 1.0
+"stay held" threshold is 0.05, comfortably satisfied by the parent's own 1.0
 regardless of episode_pedal. Consequently no monkeypatch of vehicle.control is
 needed to make "the episode pedal win": the pedal already wins, because it is the
 sole input to the brake math that reaches the wheels. The explicit post-reset
@@ -73,7 +73,7 @@ def _resolve_launch_kwargs(cfg, kwargs):
 
 
 def _resolve_cpu_cores(cfg, total_cores):
-    """None = pinning disabled (the new default -- see sim_config.py).
+    """None = pinning disabled (the new default, see sim_config.py).
     Explicit beamng_cores wins; otherwise every core not claimed by Python."""
     if not cfg.cpu_pinning:
         return None
@@ -87,7 +87,7 @@ def _resolve_cpu_cores(cfg, total_cores):
 # abs_env_incar binds every reward constant and _terminal_g_shape into its OWN
 # module namespace (`from abs_env import ...`) and reads them as globals inside
 # step(). Rebinding those names therefore redirects the parent's own reward
-# computation -- the same seam already used for HEADLESS / MAP_NAME /
+# computation, the same seam already used for HEADLESS / MAP_NAME /
 # VEHICLE_PC, and what makes duplicating ~150 lines of step() (with its drift
 # risk) unnecessary. abs_env itself is never touched.
 #
@@ -117,7 +117,7 @@ def install_reward_spec(spec, refs_provider, episode_step_provider=None,
     """Point abs_env_incar's reward globals at `spec`. `refs_provider` is
     called at scoring time (not now) so a normalized spec picks up the
     calibration references for whatever configuration the CURRENT episode is
-    running -- speeds vary per episode, so refs cannot be bound once.
+    running, speeds vary per episode, so refs cannot be bound once.
 
     The protected parent calls the same shape function once for every dense
     step and a second time on a successful terminal step. v6 uses that order
@@ -168,7 +168,7 @@ def resolve_refs(spec, table, speed_mph, grip, radius_m, pedal=1.0):
         return None
     if table is None:
         raise KeyError(
-            "reward spec is normalized but no calibration table was loaded -- "
+            "reward spec is normalized but no calibration table was loaded, "
             "run 'Calibrate baselines' for this car first (refusing to score "
             "against absolute anchors).")
     return table.references(config_key(grip=grip, speed_mph=speed_mph,
@@ -224,7 +224,7 @@ class CornerSteerInjector:
 
     That is the last moment the parent touches steering (it holds steering=0
     through acceleration so the car reaches speed in a straight line), and it
-    is followed by the coast-down loop -- so the wheel goes on at the start of
+    is followed by the coast-down loop, so the wheel goes on at the start of
     the coast and the car turns in before the slam latches. Steering is not
     re-sent afterwards: the parent's per-step `vehicle.control(brake=1.0)`
     sends only the arguments it was given, so an input it never mentions keeps
@@ -275,7 +275,7 @@ def _maybe_override_vehicle_pc(vehicle_pc):
     """Set BEFORE super().__init__(): abs_env_incar.py reads its own module
     global VEHICLE_PC_INCAR (not a constructor parameter) when forcing the
     training car onto the ego vehicle. None leaves the reference-machine
-    default (Machine-Trainer-Boy-V2-MLABS.pc) untouched -- same seam pattern
+    default (Machine-Trainer-Boy-V2-MLABS.pc) untouched, same seam pattern
     as HEADLESS/MAP_NAME above, one module over."""
     if vehicle_pc:
         abs_env_incar.VEHICLE_PC_INCAR = vehicle_pc
@@ -292,7 +292,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
                  radius_m=None, grip_spec=None, grip_lead_seconds=0.0,
                  corner_spec=None, force_action=None, deterministic=True,
                  train_speed_factor=1.0, **kwargs):
-        # self._sim_config must exist before super().__init__() runs -- the
+        # self._sim_config must exist before super().__init__() runs, the
         # parent's __init__ calls self._apply_performance_tuning(...) (our
         # override below) partway through its own body.
         self._sim_config = sim_config or SimConfig()
@@ -312,7 +312,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
             # brake in a straight line while every log said it was cornering.
             raise ValueError(
                 f"corner R={corner_spec.radius_m} m has no steering angle and the "
-                f"calibration table has none either -- run the steering seek "
+                f"calibration table has none either, run the steering seek "
                 f"(reference_runner.py --corner ...) before training this corner.")
         self._heading = None
         # Overrides the policy's action every step. force_action=(0,0) is the
@@ -345,7 +345,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         if sim_config is not None:
             headless, map_name, kwargs = _resolve_launch_kwargs(sim_config, kwargs)
             # HEADLESS/MAP_NAME are read as module globals inside abs_env's
-            # __init__ body, not passed as parameters -- same seam
+            # __init__ body, not passed as parameters, same seam
             # abs_env_incar.py already uses for VEHICLE_PC. Only touched when
             # sim_config is explicitly given, so an existing caller that never
             # passes one launches exactly as before.
@@ -368,8 +368,8 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         self.bng = sim_clock.wrap(self.bng, deterministic=self.deterministic,
                                   speed_factor=self.train_speed_factor)
         # The frame limiter is deliberately LEFT ALONE. Removing it makes step()
-        # return without advancing physics -- 16.5 python steps per controller
-        # tick, measured -- so episodes never reach the stop and score zero.
+        # return without advancing physics, 16.5 python steps per controller
+        # tick, measured, so episodes never reach the stop and score zero.
         # See the block in sim_clock.py and `stage_probe.py --uncap on`.
         self.pedal_range = pedal_range          # None => constant 1.0
         self.episode_pedal = 1.0
@@ -390,7 +390,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
     def _apply_performance_tuning(self, python_cores, beamng_cores):
         """Override, not an edit to the protected abs_env.py: that file calls
         this unconditionally with its own hardcoded core lists. CPU pinning is
-        opt-in now (sim_config.cpu_pinning, default False) -- a config tuned
+        opt-in now (sim_config.cpu_pinning, default False), a config tuned
         for one specific CPU has no business running unasked on someone else's
         machine, and it was already a silent no-op here anyway (psutil isn't
         in this project's venv)."""
@@ -412,7 +412,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
 
     def _draw_grip(self):
         """Returns the multiplier for this episode. With no spec (stock) the
-        value is 1.0 AND nothing is armed -- "don't touch grip at all" is
+        value is 1.0 AND nothing is armed, "don't touch grip at all" is
         different from "explicitly set grip to 1.0", even though both describe
         the same physics, because only the latter writes to the tire nodes."""
         if self._grip_spec is None:
@@ -461,7 +461,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # Tire grip is drawn per episode and applied AT BRAKE ONSET (see
         # GripArmInjector): the acceleration and coast approach always run at
         # stock grip, so a low-grip episode still reaches its target speed.
-        # `grip` stays 1.0 when no spec was given -- "stock", never touched.
+        # `grip` stays 1.0 when no spec was given, "stock", never touched.
         self.grip = self._draw_grip()
         self._ring.clear()
         self._yaw_trace.clear()
@@ -480,20 +480,20 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
                 obs, info = super().reset(seed=seed)
             if self._corner is not None and not steer_inj.applied:
                 raise RuntimeError(
-                    "corner steering was never applied during reset() -- the "
+                    "corner steering was never applied during reset(), the "
                     "parent's armBrakeSlam call was not seen, so this episode "
                     f"would have braked in a straight line while being logged "
                     f"as radius={self.radius_m} m. Refusing to continue.")
             if self._pending_grip is not None and not inj.armed:
                 raise RuntimeError(
-                    "grip change was never armed during reset() -- the parent's "
+                    "grip change was never armed during reset(), the parent's "
                     "armBrakeSlam call was not seen, so this episode would have "
                     "run at stock grip while being logged as "
                     f"grip={self.grip}. Refusing to continue.")
         except Exception as e:
             # The parent's two RuntimeErrors name the failed phase ("brake slam
             # never fired" vs "never engaged/exited warmup") and embed the
-            # electrics snapshot in the message -- log verbatim, then re-raise.
+            # electrics snapshot in the message, log verbatim, then re-raise.
             log.error("reset FAILED after %.1fs: %s: %s", time.monotonic() - t0,
                       type(e).__name__, e)
             raise
@@ -503,7 +503,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
                  self.episode_count, self.target_mph, self.start_speed_ms,
                  self._ep_t0 - t0)
         # Parent's reset() has already engaged the controller with a hardcoded
-        # brake=1.0 (abs_env_incar.py:254) -- required, since engage needs
+        # brake=1.0 (abs_env_incar.py:254), required, since engage needs
         # driverBrake > threshold and episode_pedal may be well below that. This
         # call is INERT: abs_env_incar.py's step() re-asserts brake=1.0 every tick
         # (module docstring), so whatever is set here is overwritten before the
@@ -516,7 +516,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
     def _corner_steering(self):
         """The angle for the episode about to run. An explicit CornerSpec angle
         wins; otherwise it comes from the calibration row for this episode's
-        (grip, speed, radius) -- the same row whose slam/stock references will
+        (grip, speed, radius), the same row whose slam/stock references will
         score it, so the run and its ruler are driven identically."""
         if self._corner is None:
             return None
@@ -524,7 +524,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
             return self._corner.signed_steering
         # Sign from the spec, magnitude from the table. config_key carries no
         # turn direction, so a row measured on a right-hander would otherwise
-        # steer right while target_yaw_rate demanded left -- yaw error of 2v/R
+        # steer right while target_yaw_rate demanded left, yaw error of 2v/R
         # for the whole episode and a guaranteed "crash" that is pure
         # bookkeeping. Reusing the magnitude assumes the two directions are
         # symmetric, which holds on the flat, featureless calibration map.
@@ -544,7 +544,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         self.target_yaw_rate = 0.0
         # NOT self._last_gps_speed: the parent resets that to 999.0 and only
         # fills it in partway through its own step(), so reading it before the
-        # first step would ask for 999/R rad/s of yaw -- one step of that
+        # first step would ask for 999/R rad/s of yaw, one step of that
         # exhausts the entire terminal yaw budget and triggers the catastrophic
         # backstop on every corner episode.
         self._corner_speed = self.start_speed_ms
@@ -579,7 +579,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         target_yaw_rate is recomputed here from the CURRENT speed rather than
         latched at brake onset: the demand is v/R, and v is falling to zero
         over the stop. Speed is last step's reading (the parent has not polled
-        yet) -- one step of lag at 200 Hz, i.e. under 0.3% of the entry speed."""
+        yet), one step of lag at 200 Hz, i.e. under 0.3% of the entry speed."""
         if self._heading is None:
             return
         if self._corner is not None:
@@ -619,11 +619,11 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         self._heading.observe(self.current_heading)
         self._corner_speed = self._last_gps_speed
         # obs[6] is yaw_avg, the exact channel abs_env_incar's reward reads, and
-        # target_yaw_rate is what it compared against on THIS step -- so the
+        # target_yaw_rate is what it compared against on THIS step, so the
         # trace decomposes the same number the reward gated on, not a lookalike.
         yaw_error = float(obs[6]) - self.target_yaw_rate
         self._yaw_trace.push(yaw_error, self._dt)
-        # obs[5] is lateral_g -- how much of the tires' grip the corner itself is
+        # obs[5] is lateral_g, how much of the tires' grip the corner itself is
         # using, which decides whether there is any left to brake with.
         self._corner_diag.push(yaw_error, obs[5], self._last_gps_speed, self._dt)
         if self._entry_yaw_actual is None:
@@ -693,7 +693,7 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
             # Where the car ENDED UP pointing versus where the arc says it
             # should. The reward only grades the yaw RATE error integrated over
             # time, which a car that lags and then over-rotates can pass while
-            # finishing at the wrong heading -- the two errors cancel in the
+            # finishing at the wrong heading, the two errors cancel in the
             # integral but not on the road. Diagnostic only; nothing scores it.
             import math as _math
             h = self._heading

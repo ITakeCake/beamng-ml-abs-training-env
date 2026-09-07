@@ -99,7 +99,7 @@ class CoSimLink:
         """Throw away datagrams queued while Python was not reading.
 
         BeamNG transmits every control period whether or not anyone answers, so
-        an optimizer pause leaves a backlog in the socket buffer -- at 400 Hz a
+        an optimizer pause leaves a backlog in the socket buffer, at 400 Hz a
         half-second PPO update is ~200 packets. The next episode would then be
         driven by the previous episode's dying moments: PPO-67 episode 2 opened
         on a packet reading 0.32 m/s while the car was actually doing 40, filled

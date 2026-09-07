@@ -28,7 +28,7 @@ def test_default_userpath_drive_vs_tech():
 
 def test_default_userpath_does_not_include_current():
     # BeamNG.exe manages a "current" version-subfolder ITSELF under whatever
-    # -userpath it's given -- passing a path that already ends in "current"
+    # -userpath it's given, passing a path that already ends in "current"
     # makes the game create/use <userpath>/current/current (confirmed live,
     # 2026-08-29: game log showed "userpath = ...\current\current\" after
     # launching with user=default_userpath("tech")).
@@ -95,7 +95,7 @@ def test_load_corrupt_file_returns_defaults_not_crash(tmp_path, monkeypatch):
 
 
 def test_a_corrupt_file_still_gets_a_detected_game_folder(tmp_path, monkeypatch):
-    """Detection is not skipped on the error path -- a broken settings.json
+    """Detection is not skipped on the error path, a broken settings.json
     should not also cost the user their install path."""
     import sim_config as sc
     monkeypatch.setattr(sc, "autodetect_game_folder", lambda g: r"C:\detected")
@@ -225,7 +225,7 @@ def test_detect_game_version_none_when_neither_source_available(tmp_path, monkey
 # ----------------------------------------------------- game-folder autodetect
 def test_autodetect_only_fills_a_blank_game_folder(monkeypatch):
     """An explicit setting is the user's, right or wrong, and is never
-    second-guessed -- otherwise pointing at a second install silently fails."""
+    second-guessed, otherwise pointing at a second install silently fails."""
     import sim_config as sc
     monkeypatch.setattr(sc, "autodetect_game_folder", lambda g: r"C:\detected")
     kept = sc._with_detected_game_folder(sc.SimConfig(game_folder=r"C:\mine"))

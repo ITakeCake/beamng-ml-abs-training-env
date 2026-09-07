@@ -1,7 +1,7 @@
 """mod_output writes the actual mod files: generate_all_cars() for the
 per-car parent parts, export_model_to_game() merges a trained model's child
 part in (never clobbering a previously-exported sibling model on the same
-car). The exporter subprocess itself is mocked here -- test_export_policy_weights
+car). The exporter subprocess itself is mocked here, test_export_policy_weights
 style live parity is exercised separately against the real venv."""
 import json
 import os
@@ -30,7 +30,7 @@ def test_export_model_to_game_merges_without_clobbering_a_sibling(tmp_path, monk
 
     def fake_run_exporter(cmd):
         # matches the REAL exporter's behavior: it does NOT create its own
-        # output directory (bare `open(out_path, "w")`) -- the caller must.
+        # output directory (bare `open(out_path, "w")`), the caller must.
         # A mock that auto-mkdir's here would hide exactly the bug this
         # caught live: export_model_to_game calling the exporter before the
         # directory existed.
@@ -64,7 +64,7 @@ def test_export_model_to_game_merges_without_clobbering_a_sibling(tmp_path, monk
 
     models_path = os.path.join(mod_dir, "vehicles", "etk800", "ml_abs_models.jbeam")
     data = json.loads(open(models_path).read())
-    assert len(data) == 2   # both runA and runB present -- runB didn't clobber runA
+    assert len(data) == 2   # both runA and runB present, runB didn't clobber runA
     assert any("runA" in k for k in data)
     assert any("runB" in k for k in data)
 

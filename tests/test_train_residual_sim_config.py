@@ -1,4 +1,4 @@
-"""build_sim_config is pure argparse-Namespace -> SimConfig logic -- test it
+"""build_sim_config is pure argparse-Namespace -> SimConfig logic, test it
 directly rather than exercising the full trainer (which needs a live game)."""
 import argparse
 import os
@@ -17,7 +17,7 @@ def _ns(**over):
 
 
 def test_defaults_when_nothing_passed_and_no_settings_file(monkeypatch):
-    """game_folder excepted -- it is auto-detected when blank (sim_config)."""
+    """game_folder excepted, it is auto-detected when blank (sim_config)."""
     import sim_config as sc
     monkeypatch.setattr(sc, "autodetect_game_folder", lambda g: None)
     cfg = build_sim_config(_ns())

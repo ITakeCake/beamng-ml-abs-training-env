@@ -1,7 +1,7 @@
 """build_model must actually apply the kwargs the review found silently
 missing (net_arch/activation, SAC train_freq, PPO ent_coef, device). Uses a
 real tiny gym env (Pendulum-v1) so this exercises real SB3 construction, not
-a mock -- these are exactly the fields that silently fall back to SB3
+a mock, these are exactly the fields that silently fall back to SB3
 defaults if a kwarg is merely forgotten."""
 import argparse
 import os

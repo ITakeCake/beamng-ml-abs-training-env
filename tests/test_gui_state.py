@@ -13,7 +13,7 @@ import gui_state
 
 
 def test_a_missing_file_gives_empty_state_rather_than_raising(tmp_path):
-    """Startup convenience -- a stack trace here is worse than defaults."""
+    """Startup convenience, a stack trace here is worse than defaults."""
     s = gui_state.load(str(tmp_path / "nope.json"))
     assert s == gui_state.default_state()
 

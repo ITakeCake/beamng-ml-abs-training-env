@@ -18,7 +18,7 @@ from corner import (
 
 
 def _crash_heading():
-    """abs_env.CRASH_HEADING, read from source rather than imported -- abs_env
+    """abs_env.CRASH_HEADING, read from source rather than imported, abs_env
     pulls in gymnasium/beamngpy, which the pure-math suite deliberately does
     not need. Still reads the real value, so a change there reaches this test."""
     src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -30,7 +30,7 @@ def _crash_heading():
 @pytest.mark.parametrize("raw,expect", [
     (0.0, 0.0),
     (math.pi, math.pi),
-    (-math.pi, math.pi),          # (-pi, pi] -- the open end is the negative one
+    (-math.pi, math.pi),          # (-pi, pi], the open end is the negative one
     (math.pi + 0.1, -math.pi + 0.1),
     (3 * math.pi, math.pi),
     (-3.0 * math.pi + 0.2, 0.2 - math.pi),
@@ -284,7 +284,7 @@ def test_radius_and_lateral_g_round_trip():
 
 def test_a_measured_saturation_matches_the_cars_lateral_limit():
     """The live seek saturated at ~64 m at 60 mph (etk800, dry). That is 1.04 g
-    lateral -- the same limit its straight-line slam produces longitudinally,
+    lateral, the same limit its straight-line slam produces longitudinally,
     which is what saturation SHOULD mean."""
     from corner import lateral_g_for_radius
     assert lateral_g_for_radius(25.5, 63.7) == pytest.approx(1.04, abs=0.02)
@@ -311,7 +311,7 @@ def test_saturation_is_not_called_while_radius_is_still_falling():
 
 def test_the_live_etk800_seek_is_detected_as_saturated():
     """The real probe history from 2026-08-29. Detection must fire before the
-    8-probe ceiling -- the remaining probes cost minutes and cannot succeed."""
+    8-probe ceiling, the remaining probes cost minutes and cannot succeed."""
     from corner import seek_is_saturated
     history = [(0.1077, 89.23), (0.1753, 71.49), (0.2356, 66.34),
                (0.2972, 63.74), (0.3625, 63.99), (0.4436, 63.76),

@@ -156,7 +156,7 @@ from gui_cmd import build_calibration_cmd, validate_calibration_settings
 
 def test_calibration_uses_the_same_configuration_the_training_tab_is_set_to():
     """A ruler measured on a different configuration than it scores is worse
-    than no ruler -- so the fields are shared, not asked for twice."""
+    than no ruler, so the fields are shared, not asked for twice."""
     s = _base()
     s.update(speeds="60,90", grip="0.5,1.0", corner="150L")
     cmd = build_calibration_cmd(s, car="etk800")
@@ -198,7 +198,7 @@ def test_reps_are_passed_through():
 def test_the_trainer_never_inherits_pythonw(monkeypatch, tmp_path):
     """A run died with "Expected file or str, got None" after BeamNG had booted
     and driven a reset: the GUI runs under pythonw (no console window), the
-    trainer inherited it, and pythonw sets sys.stdout to None -- which SB3's
+    trainer inherited it, and pythonw sets sys.stdout to None, which SB3's
     verbose=1 logger writes to unconditionally."""
     import gui_cmd
     (tmp_path / "python.exe").write_text("")

@@ -1,5 +1,5 @@
 """The live measurement in reference_runner needs a running game, but its
-guard rails and reference-car wiring are pure and must not regress -- a wrong
+guard rails and reference-car wiring are pure and must not regress, a wrong
 calibration row is worse than a missing one, since training consumes it
 silently."""
 import json
@@ -25,7 +25,7 @@ def test_check_supported_allows_grip_now_that_it_is_implemented():
 
 def test_check_supported_refuses_a_corner_with_no_measured_steering_angle():
     """A corner asked for with no angle would brake in a straight line and get
-    written under a key claiming a radius -- the exact class of silently-wrong
+    written under a key claiming a radius, the exact class of silently-wrong
     row the runner exists to refuse."""
     with pytest.raises(ValueError, match="steering seek"):
         check_supported(grip=1.0, radius_m=50)
@@ -37,7 +37,7 @@ def test_check_supported_allows_a_corner_once_the_angle_is_known():
 
 def test_reference_cars_differ_only_in_the_abs_slot():
     """The whole calibration rests on ABS being the ONLY difference between the
-    slam and stock cars -- if ESC/TC/tires/brakes ever diverge, the measured
+    slam and stock cars, if ESC/TC/tires/brakes ever diverge, the measured
     'stock ABS advantage' silently becomes an advantage of something else."""
     def parts(pc_rel):
         path = os.path.join(REPO, "assets", "cars", "etk800", os.path.basename(pc_rel))
@@ -55,7 +55,7 @@ def test_reference_cars_differ_only_in_the_abs_slot():
 def test_stock_reference_never_uses_arcade_abs():
     """BeamNG's own built-in brake test defaults to 'arcade', the idealized
     cheating mode. Anchoring the reward on that would be anchoring it on a
-    fiction -- the stock reference must be the vehicle's real configured ABS."""
+    fiction, the stock reference must be the vehicle's real configured ABS."""
     assert ABS_BEHAVIOR["stock"] == "realistic"
     assert ABS_BEHAVIOR["slam"] == "off"
     assert "arcade" not in ABS_BEHAVIOR.values()

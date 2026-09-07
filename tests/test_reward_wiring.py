@@ -2,7 +2,7 @@
 
 abs_env_incar binds every reward constant and _terminal_g_shape into its own
 module namespace and reads them as globals inside step(), so rebinding those
-names redirects the parent's own reward computation -- the same seam already
+names redirects the parent's own reward computation, the same seam already
 used for HEADLESS / MAP_NAME / VEHICLE_PC, and the reason the ~150-line
 duplication (and its drift risk) is avoidable.
 """
@@ -29,7 +29,7 @@ REFS = (1.0315, 1.1884)
 
 @pytest.fixture(autouse=True)
 def _restore_after_each_test():
-    """These tests rebind module globals -- always put them back, or a later
+    """These tests rebind module globals, always put them back, or a later
     test (or a real run in the same process) inherits a patched reward."""
     yield
     restore_reward_defaults()
@@ -56,7 +56,7 @@ def test_installing_normalized_redirects_the_shape():
     slam_g, stock_g = REFS
     assert abs_env_incar._terminal_g_shape(stock_g) == pytest.approx(0.0, abs=1e-9)
     assert abs_env_incar._terminal_g_shape(slam_g) < 0
-    # the protected module itself is untouched -- only the importing namespace
+    # the protected module itself is untouched, only the importing namespace
     assert abs_env._terminal_g_shape(stock_g) > 900
 
 

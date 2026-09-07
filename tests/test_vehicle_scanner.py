@@ -1,4 +1,4 @@
-"""vehicle_scanner reads BeamNG's own zips/userpath -- no game imports needed
+"""vehicle_scanner reads BeamNG's own zips/userpath, no game imports needed
 to test it, just real (or synthetic-fixture) zip files."""
 import os
 import sys

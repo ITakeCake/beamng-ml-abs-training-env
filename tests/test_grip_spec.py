@@ -1,4 +1,4 @@
-"""Grip spec parsing: three modes Blake specified -- off/stock (never touch),
+"""Grip spec parsing: three modes Blake specified, off/stock (never touch),
 a concrete level, or randomized between runs. Pure, no game imports."""
 import os
 import random
@@ -55,7 +55,7 @@ def test_rejects_out_of_range_and_malformed():
 
 def test_above_stock_grip_is_allowed():
     """Multipliers > 1 are legitimate (stickier-than-stock tires), so the
-    range is not capped at 1.0 -- only absurd values are rejected."""
+    range is not capped at 1.0, only absurd values are rejected."""
     assert parse_grip_spec("1.5").draw(random.Random(0)) == 1.5
 
 

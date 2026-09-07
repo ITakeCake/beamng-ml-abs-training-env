@@ -6,34 +6,10 @@ This project is still in active development and experimentation.
 
 ## The idea
 
-The trained action is a **release from the driver's pedal**, per axle, not the
-brake level itself. Zero action = full-pedal slam = the known lockup baseline,
-so training starts at the anti-lock boundary instead of having to discover
-"brake hard" first. Reward is g-force only (per-step + terminal shape).
-
-## Status
-
-Early scaffold, migrated from a working single-machine prototype. Not yet
-generalized to run on someone else's install -- see [docs/PLAN.md](docs/PLAN.md)
-for what's done and what's left.
-
-## Layout
-
-- `abs_env.py`, `abs_env_incar.py` -- the training-loop environment (byte-identical
-  reference copies; never hand-edit, only subclass)
-- `abs_env_residual.py` -- the residual (release-from-pedal) env
-- `residual_core.py` -- pure action-space math + CLI arg parsing (no game imports)
-- `residual_log.py` -- shared logging (GUI / trainer / probe each get their own log file)
-- `train_cosim.py` -- current 100 Hz co-sim PPO trainer
-- `train_residual.py` -- legacy in-car SAC/PPO trainer
-- `bounded_ppo.py` -- bounded PPO action distribution and checkpoint contract
-- `experiment_io.py` -- atomic checkpoint pairs, validation, run state, provenance
-- `evaluate_cosim.py` -- frozen checkpoint evaluation and best-pair preservation
-- `gui_train.py`, `gui_cmd.py` -- tkinter launcher/monitor GUI
-- `baseline_probe.py` -- sanity gates run before trusting a training config
-- `abstelemetry.lua` -- in-game telemetry/actuation bridge
-- `assets/` -- the BeamNG mod (ABS controller) + reference car configs this ships with
-- `docs/PLAN.md` -- build plan and design notes
+The trained action is a per-axle **release from the driver's brake pedal**, not the
+brake level itself. Zero action = full pedal slam = the known lockup baseline.
+Training starts at the anti-lock boundary instead of discovering "brake hard" first.
+Reward is g-force only (per-step + terminal shape).
 
 ## Setup
 
@@ -42,21 +18,104 @@ pip install -r requirements.txt
 python -m pytest tests -q
 ```
 
-Requires a BeamNG.tech or BeamNG.drive install; `beamngpy` must match your
-game version's wire protocol (see requirements.txt).
+Requires a BeamNG.tech or BeamNG.drive install. `beamngpy` must match your game
+version's wire protocol (see `requirements.txt`).
 
-## Quick start (current, single-machine state)
+## Quick start: co-sim PPO (current default)
+
+Launch `gui_train.py`, select `cosim`, configure the run, and press Start. The GUI
+handles simulator setup, training, and live monitoring. Graceful stop writes a
+marker file. Never kill the trainer process.
+
+Or from the command line:
+
+```bash
+python train_cosim.py --config config.json
+```
+
+See [docs/REFERENCE.md](docs/REFERENCE.md) for the full config.json schema and
+output file formats.
+
+## Quick start: legacy residual backend
 
 ```bash
 python train_residual.py --algo sac --speeds "60" --pedal off \
     --total-steps 10000 --run-name smoke_sac
 ```
 
-Or launch `gui_train.py`, select `cosim`, set the run-up multiplier, and use the
-live monitor. Graceful stop writes a run-local marker and remains usable after a
-GUI restart while the trainer PID is present.
+Or launch `gui_train.py` and select the residual backend. Supports SAC and PPO.
 
-New bounded co-sim checkpoints export with the dedicated
-`MTB-ML-ABS-CoSim.lua` 13-observation/two-axle controller. The Output tab blocks
-legacy unbounded co-sim and 28x16 residual checkpoints instead of silently
-routing them through the incompatible historical four-action controller.
+## Layout
+
+**Environments:**
+
+- `abs_env.py`, `abs_env_incar.py`: base in-car training environment.
+- `abs_env_cosim.py`: co-sim environment (current default).
+- `abs_env_residual.py`: residual (release-from-pedal) env subclass.
+- `cosim_link.py`: UDP co-simulation transport.
+
+**Trainers:**
+
+- `train_cosim.py`: co-sim PPO trainer (the GUI's default backend).
+- `train_residual.py`: legacy in-car SAC/PPO trainer.
+- `bounded_ppo.py`: affine-tanh action distribution and checkpoint contract.
+- `distill_teacher.py`: supervised distillation from a privileged teacher.
+
+**GUI:**
+
+- `gui_train.py`: tkinter launcher and live monitor.
+- `gui_cmd.py`: settings-to-argv translation and pre-launch validation.
+- `gui_help.py`: inline help text.
+- `gui_state.py`: field persistence.
+- `train_monitor.py`, `train_progress.py`: live training stats.
+
+**Evaluation and output:**
+
+- `evaluate_cosim.py`: frozen checkpoint evaluation and best-pair preservation.
+- `export_policy_weights.py`: exports trained weights to a deployable Lua blob.
+- `mod_output.py`, `jbeam_generator.py`: generate the BeamNG mod for deployment.
+- `model_registry.py`: lists finished runs for the GUI.
+
+**Calibration and validation:**
+
+- `calibration.py`, `calibration_progress.py`: per-config baseline measurement.
+- `reference_runner.py`: automated slam/stock baseline runner.
+- `baseline_probe.py`: sanity gates before trusting a training config.
+- `simulator_guard.py`: pre-flight simulator checks.
+
+**Reward and config:**
+
+- `reward_spec.py`: reward presets (v5.0 through v11.0).
+- `residual_core.py`: action-space math and CLI arg parsing.
+- `sim_config.py`: simulator settings (game path, port, headless, map).
+- `sim_clock.py`: frame limiter management.
+- `corner.py`: arc geometry and steering seek for corner training.
+
+**Shared:**
+
+- `residual_log.py`: logging setup (GUI, trainer, probe each get their own file).
+- `compat.py`: beamngpy version compatibility checks.
+- `vehicle_scanner.py`: scans game zips for car models and trims.
+- `asset_installer.py`: deploys mod files to the game userpath.
+- `experiment_io.py`: atomic checkpoint pairs, validation, run state.
+- `training_diagnostics.py`: per-rollout and per-episode diagnostic artifacts.
+
+**In-game:**
+
+- `abstelemetry.lua`: telemetry bridge and per-wheel brake control (2 kHz).
+- `assets/`: the BeamNG mod (ABS controller Lua, jbeam parts, reference car configs).
+
+**Tests:**
+
+- `tests/`: 735 offline unit and integration tests.
+
+**Docs:**
+
+- `docs/REFERENCE.md`: complete technical reference (reward, GUI contract, control
+  ceiling measurements, performance notes, the 1.19 g result).
+
+## The metric
+
+All performance numbers use the standardized 2 kHz brake metric
+(`last_brake_avg_g` / `last_brake_dist`) computed by `abstelemetry.lua` inside the
+game's physics loop. Never self-computed, never frame-rate.

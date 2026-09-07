@@ -1,5 +1,5 @@
 """Corner wiring inside the env: the steering injector, the per-step yaw target,
-and -- the one that guards everything already shipped -- that a straight-line
+and, the one that guards everything already shipped, that a straight-line
 episode is completely untouched by any of it."""
 import math
 import os
@@ -139,7 +139,7 @@ def test_straight_line_leaves_the_parents_target_exactly_where_it_was():
 def test_the_first_step_uses_the_start_speed_not_the_parents_sentinel():
     """abs_env_incar.reset() leaves _last_gps_speed at 999.0 and only fills it
     in partway through step(). Reading it before the first step would demand
-    999/R rad/s -- one step of that exhausts the whole terminal yaw budget and
+    999/R rad/s, one step of that exhausts the whole terminal yaw budget and
     fires the catastrophic backstop on every single corner episode."""
     env = StubEnv(CornerSpec(50.0, LEFT, 0.25), start_speed_ms=26.8)
     env._start_corner_tracking()
@@ -244,7 +244,7 @@ def test_steering_comes_from_the_row_that_will_also_score_the_episode():
 def test_direction_comes_from_the_spec_not_the_stored_sign():
     """config_key carries no turn direction, so a row measured on a right-hander
     is the only row a left-hander can find. Taking the stored sign would steer
-    right while target_yaw_rate demanded left -- 2v/R of yaw error all episode
+    right while target_yaw_rate demanded left, 2v/R of yaw error all episode
     and a guaranteed 'crash' that is pure bookkeeping."""
     from calibration import config_key
     key = config_key(grip=1.0, speed_mph=60, radius_m=50.0)
