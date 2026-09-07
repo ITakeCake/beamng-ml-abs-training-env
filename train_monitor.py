@@ -250,7 +250,7 @@ class TrainMonitor:
 
 
 # ------------------------------------------------------------ data sources
-def _csv_path(target):
+def _csv_path(target, episode_filename="episode_log_env0.csv"):
     """Accept a run directory or the CSV itself.
 
     The per-run copy is a mirror of logs/episode_log_env0.csv, so a run whose
@@ -259,14 +259,15 @@ def _csv_path(target):
     long run possible after that has happened."""
     if os.path.isfile(target):
         return target
-    return os.path.join(target, "episode_log_env0.csv")
+    return os.path.join(target, episode_filename)
 
 
-def file_source(run_dir, total_steps=0, run_name=""):
+def file_source(run_dir, total_steps=0, run_name="",
+                episode_filename="episode_log_env0.csv"):
     """Read the run's episode CSV every call. Missing file reads as 'no episodes
     yet' rather than an error: the file appears only after episode 1 finishes."""
     import csv
-    path = _csv_path(run_dir)
+    path = _csv_path(run_dir, episode_filename)
 
     def read():
         rows = []

@@ -1,6 +1,11 @@
-"""Launcher/monitor for residual ABS training (SAC or PPO). Shells out to
-train_residual.py -- never reimplements training logic here."""
+"""Launcher/monitor for current co-sim PPO and legacy residual SAC/PPO.
+
+The GUI only translates settings, spawns the selected trainer, reads its files,
+and writes its run-local stop marker; environment/training logic stays in the
+backend entry points.
+"""
 import csv
+import json
 import os
 import subprocess
 import sys
@@ -14,8 +19,10 @@ import gui_help
 import train_monitor
 import gui_state
 import calibration_progress as calprog
-from gui_cmd import (build_cmd, build_calibration_cmd, validate_settings,
-                     validate_calibration_settings)
+from gui_cmd import (
+    build_cmd, build_cosim_cmd, build_cosim_config, build_calibration_cmd,
+    validate_settings, validate_calibration_settings,
+)
 from residual_log import setup_logging, tail_lines
 from sim_config import (
     SimConfig, load as load_sim_config, save as save_sim_config,
@@ -30,6 +37,9 @@ from compat import check_compat
 import asset_installer
 import mod_output
 from model_registry import list_finished_runs
+from reward_spec import PRESETS
+from experiment_io import append_jsonl, update_run_state, utc_now
+from simulator_guard import require_beamng_available
 
 CUSTOM_TRIM_LABEL = "Custom..."
 
@@ -55,27 +65,51 @@ TRAIN_LOG_TAIL = 20   # lines of the run's train.log shown when the trainer dies
 
 SAC_DEFAULTS = dict(lr=1e-4, buffer_size=100_000, tau=0.005,
                     target_entropy=-2.0, learning_starts=5_000, train_freq=2)
-PPO_DEFAULTS = dict(lr=1e-4, n_steps=2048, batch_size=512, n_epochs=10,
-                    clip_range=0.2, gae_lambda=0.95, ent_coef=0.005)
+PPO_DEFAULTS = dict(lr=1e-4, n_steps=8192, batch_size=512, n_epochs=4,
+                    clip_range=0.2, gae_lambda=0.95, gamma=0.995, ent_coef=0.0,
+                    initial_release=0.50, log_std_init=0.0, target_kl=0.02)
 
 SAC_LABELS = dict(lr="learning rate", buffer_size="buffer size", tau="tau",
                   target_entropy="target entropy", learning_starts="learning starts",
                   train_freq="train freq (steps)")
 PPO_LABELS = dict(lr="learning rate", n_steps="n steps", batch_size="batch size",
                   n_epochs="n epochs", clip_range="clip range", gae_lambda="GAE lambda",
-                  ent_coef="entropy coef")
+                  gamma="gamma", ent_coef="entropy coef", initial_release="initial release",
+                  log_std_init="initial log std", target_kl="target KL")
+
+COSIM_REWARDS = tuple(
+    name for name, factory in PRESETS.items() if not factory().normalize)
+
+
+def next_run_name(runs_dir, prefix="PPO"):
+    """Next numeric run name, considering finished and unfinished directories."""
+    import re
+    highest = 0
+    try:
+        names = [entry.name for entry in os.scandir(runs_dir) if entry.is_dir()]
+    except OSError:
+        names = []
+    pattern = re.compile(r"^" + re.escape(prefix) + r"-(\d+)$", re.I)
+    for name in names:
+        match = pattern.match(name)
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return f"{prefix}-{highest + 1:02d}"
 
 
 class ResidualTrainerGUI:
     def __init__(self, root):
         self.root = root
-        root.title("Residual ABS Trainer")
+        root.title("BeamNG ML-ABS Trainer")
         self.proc = None
         self._monitor = None
         self.field_vars = {}
         self._active_run = None          # run name of the process we launched
         self._log_seen = False           # per-run log-file-appeared transition
         self._last_parse_err = None      # dedupe repeating monitor parse errors
+        self._active_backend = None
+        self._residual_only_rows = []
+        self._settings_backend = None
         # tkinter swallows exceptions raised inside callbacks -- sys.excepthook
         # never sees them -- so route them into gui.log explicitly.
         root.report_callback_exception = self._tk_exception
@@ -98,24 +132,68 @@ class ResidualTrainerGUI:
         self._build_simulator_tab(pad)
         self._build_output_tab(pad)
 
-        # Row 1: algo dropdown
+        # Row 1: backend + algo. Co-sim is the current 100 Hz training contract;
+        # residual keeps the older in-car experiment available for comparison.
         row1 = ttk.Frame(self.training_tab)
         row1.pack(fill="x", **pad)
+        ttk.Label(row1, text="Backend:").pack(side="left")
+        self.backend_var = tk.StringVar(
+            value=gui_state.run_value(self.state, "backend", "cosim"))
+        self.backend_box = ttk.Combobox(
+            row1, textvariable=self.backend_var, values=["cosim", "residual"],
+            state="readonly", width=10)
+        self.backend_box.pack(side="left", padx=6)
+        self.backend_box.bind("<<ComboboxSelected>>", lambda e: self._sync_backend())
+        gui_help.attach(self.backend_box, None, "backend")
+        old_reward = gui_state.run_value(self.state, "reward", "v6.0")
+        old_run_name = gui_state.run_value(self.state, "run_name", "residual_run1")
+        self._reward_by_backend = {
+            "cosim": gui_state.run_value(self.state, "cosim_reward", "v6.0"),
+            "residual": gui_state.run_value(
+                self.state, "residual_reward", old_reward),
+        }
+        self._run_name_by_backend = {
+            "cosim": gui_state.run_value(
+                self.state, "cosim_run_name", next_run_name(RUNS_DIR)),
+            "residual": gui_state.run_value(
+                self.state, "residual_run_name", old_run_name),
+        }
+
         ttk.Label(row1, text="Algorithm:").pack(side="left")
         self.algo_var = tk.StringVar(value=gui_state.run_value(self.state, "algo", "sac"))
-        algo_box = ttk.Combobox(row1, textvariable=self.algo_var, values=["sac", "ppo"],
-                                state="readonly", width=8)
-        algo_box.pack(side="left", padx=6)
-        algo_box.bind("<<ComboboxSelected>>", lambda e: self._swap_algo_panel())
-        gui_help.attach(algo_box, None, "algo")
+        self.algo_box = ttk.Combobox(
+            row1, textvariable=self.algo_var, values=["sac", "ppo"],
+            state="readonly", width=8)
+        self.algo_box.pack(side="left", padx=6)
+        self.algo_box.bind("<<ComboboxSelected>>", lambda e: self._swap_algo_panel())
+        gui_help.attach(self.algo_box, None, "algo")
 
         ttk.Label(row1, text="Network:").pack(side="left", padx=(18, 0))
+        self._net_arch_by_backend = {
+            "cosim": gui_state.run_value(self.state, "cosim_net_arch", "3x256"),
+            "residual": gui_state.run_value(
+                self.state, "residual_net_arch",
+                gui_state.run_value(self.state, "net_arch", "3x256")),
+        }
         self.net_arch_var = tk.StringVar(
-            value=gui_state.run_value(self.state, "net_arch", "3x256"))
+            value=self._net_arch_by_backend.get(self.backend_var.get(), "3x256"))
         e = ttk.Entry(row1, textvariable=self.net_arch_var, width=16)
         e.pack(side="left", padx=6)
         gui_help.attach(e, None, "net_arch")
         ttk.Label(row1, text='layers x width, or "512,256,128"').pack(side="left")
+
+        ttk.Label(row1, text="Run-up:").pack(side="left", padx=(18, 0))
+        self.runup_speed_var = tk.StringVar(value=str(
+            gui_state.run_value(self.state, "runup_speed_factor", "4")))
+        self.runup_speed_entry = ttk.Entry(
+            row1, textvariable=self.runup_speed_var, width=6)
+        self.runup_speed_entry.pack(side="left", padx=6)
+        gui_help.attach(self.runup_speed_entry, None, "runup_speed_factor")
+        ttk.Label(row1, text="x (co-sim acceleration only)").pack(side="left")
+
+        self.backend_note_var = tk.StringVar(value="")
+        ttk.Label(self.training_tab, textvariable=self.backend_note_var,
+                  foreground="#555555").pack(fill="x", padx=6, pady=(0, 2))
 
         self.algo_panel = ttk.Frame(self.training_tab)
         self.algo_panel.pack(fill="x", **pad)
@@ -137,6 +215,7 @@ class ResidualTrainerGUI:
         # Row 3: pedal randomization
         row3 = ttk.Frame(self.training_tab)
         row3.pack(fill="x", **pad)
+        self._residual_only_rows.append(row3)
         self.pedal_random_var = tk.BooleanVar(
             value=bool(gui_state.run_value(self.state, "pedal_random", False)))
         cb = ttk.Checkbutton(row3, text="Randomize pedal", variable=self.pedal_random_var,
@@ -154,6 +233,7 @@ class ResidualTrainerGUI:
         # has to match what the reference runner was run with.
         row4 = ttk.Frame(self.training_tab)
         row4.pack(fill="x", **pad)
+        self._residual_only_rows.append(row4)
         ttk.Label(row4, text="Tire grip:").pack(side="left")
         self.grip_var = tk.StringVar(
             value=gui_state.run_value(self.state, "grip", "off"))
@@ -165,6 +245,7 @@ class ResidualTrainerGUI:
 
         row4b = ttk.Frame(self.training_tab)
         row4b.pack(fill="x", **pad)
+        self._residual_only_rows.append(row4b)
         ttk.Label(row4b, text="Corner radius:").pack(side="left")
         self.corner_var = tk.StringVar(
             value=gui_state.run_value(self.state, "corner", "straight"))
@@ -177,6 +258,7 @@ class ResidualTrainerGUI:
         # Row 4c: reward preset
         row_fast = ttk.Frame(self.training_tab)
         row_fast.pack(fill="x", **pad)
+        self._residual_only_rows.append(row_fast)
         self.fast_cal_var = tk.BooleanVar(
             value=bool(gui_state.run_value(self.state, "fast_calibration", True)))
         cbf = ttk.Checkbutton(row_fast, text="Fast calibration",
@@ -193,6 +275,7 @@ class ResidualTrainerGUI:
 
         row_det = ttk.Frame(self.training_tab)
         row_det.pack(fill="x", **pad)
+        self._residual_only_rows.append(row_det)
         self.determ_var = tk.BooleanVar(
             value=bool(gui_state.run_value(self.state, "deterministic", True)))
         cbd = ttk.Checkbutton(row_det, text="Deterministic training",
@@ -219,13 +302,15 @@ class ResidualTrainerGUI:
         row4c.pack(fill="x", **pad)
         ttk.Label(row4c, text="Reward:").pack(side="left")
         self.reward_var = tk.StringVar(
-            value=gui_state.run_value(self.state, "reward", "v5.0"))
-        cbo = ttk.Combobox(row4c, textvariable=self.reward_var, width=14, state="readonly",
-                           values=["v5.0", "normalized"])
-        cbo.pack(side="left", padx=6)
-        gui_help.attach(cbo, None, "reward")
-        ttk.Label(row4c, text="normalized = anchored on this config's measured "
-                  "slam/stock references").pack(side="left")
+            value=self._reward_by_backend.get(self.backend_var.get(), "v6.0"))
+        self.reward_combo = ttk.Combobox(
+            row4c, textvariable=self.reward_var, width=14, state="readonly",
+            values=list(COSIM_REWARDS) + ["normalized"])
+        self.reward_combo.pack(side="left", padx=6)
+        gui_help.attach(self.reward_combo, None, "reward")
+        self.reward_row = row4c
+        ttk.Label(row4c, text="v6.0 = sustained braking G with consistency, no "
+                  "target or upper plateau").pack(side="left")
         ttk.Checkbutton(row4c, text="Pedal patterns ramp/pump (V4)",
                         state="disabled").pack(side="left", padx=12)
 
@@ -234,10 +319,12 @@ class ResidualTrainerGUI:
         row5.pack(fill="x", **pad)
         ttk.Label(row5, text="Run name:").pack(side="left")
         self.run_name_var = tk.StringVar(
-            value=gui_state.run_value(self.state, "run_name", "residual_run1"))
-        e = ttk.Entry(row5, textvariable=self.run_name_var, width=20)
-        e.pack(side="left", padx=6)
-        gui_help.attach(e, None, "run_name")
+            value=self._run_name_by_backend.get(self.backend_var.get(),
+                                                next_run_name(RUNS_DIR)))
+        self.run_name_entry = ttk.Entry(
+            row5, textvariable=self.run_name_var, width=20)
+        self.run_name_entry.pack(side="left", padx=6)
+        gui_help.attach(self.run_name_entry, None, "run_name")
         ttk.Label(row5, text="Total steps:").pack(side="left", padx=(12, 0))
         self.total_steps_var = tk.StringVar(
             value=gui_state.run_value(self.state, "total_steps", "200000"))
@@ -245,21 +332,31 @@ class ResidualTrainerGUI:
         e.pack(side="left", padx=6)
         gui_help.attach(e, None, "total_steps")
         self.resume_var = tk.StringVar(value="")
-        b = ttk.Button(row5, text="Resume from...", command=self._pick_resume)
-        b.pack(side="left", padx=(12, 0))
-        gui_help.attach(b, None, "resume")
+        self.resume_button = ttk.Button(
+            row5, text="Resume from...", command=self._pick_resume)
+        self.resume_button.pack(side="left", padx=(12, 0))
+        gui_help.attach(self.resume_button, None, "resume")
         self.resume_label = ttk.Label(row5, text="(none)")
         self.resume_label.pack(side="left", padx=6)
+        ttk.Label(row5, text="Seed:").pack(side="left", padx=(12, 0))
+        self.seed_var = tk.StringVar(
+            value=str(gui_state.run_value(self.state, "seed", "auto")))
+        seed_entry = ttk.Entry(row5, textvariable=self.seed_var, width=11)
+        seed_entry.pack(side="left", padx=6)
 
         # Row 6: start/stop/status
         row6 = ttk.Frame(self.training_tab)
         row6.pack(fill="x", **pad)
-        ttk.Button(row6, text="START", command=self.start).pack(side="left")
-        ttk.Button(row6, text="GRACEFUL STOP", command=self.stop).pack(side="left", padx=6)
+        self.start_button = ttk.Button(row6, text="START", command=self.start)
+        self.start_button.pack(side="left")
+        self.stop_button = ttk.Button(
+            row6, text="GRACEFUL STOP", command=self.stop)
+        self.stop_button.pack(side="left", padx=6)
         ttk.Button(row6, text="Show monitor",
                    command=self._show_monitor).pack(side="left", padx=6)
-        ttk.Button(row6, text="Calibrate baselines",
-                   command=self.calibrate).pack(side="left", padx=(18, 0))
+        self.calibrate_button = ttk.Button(
+            row6, text="Calibrate baselines", command=self.calibrate)
+        self.calibrate_button.pack(side="left", padx=(18, 0))
         self.status_var = tk.StringVar(value="idle")
         ttk.Label(row6, textvariable=self.status_var).pack(side="left", padx=12)
 
@@ -269,6 +366,8 @@ class ResidualTrainerGUI:
         self.monitor_var = tk.StringVar(value="episodes: -- | rolling-20 avg_g: -- | best avg_g: -- | last outcome: --")
         ttk.Label(row7, textvariable=self.monitor_var).pack(side="left", padx=6, pady=4)
 
+        self._sync_backend()
+        self._reattach_active_run()
         self.root.after(1000, self._poll_monitor)
 
     def _open_monitor(self, settings=None):
@@ -290,7 +389,8 @@ class ResidualTrainerGUI:
             self._monitor = train_monitor.TrainMonitor(
                 self.root,
                 train_monitor.file_source(self._run_dir(), total_steps=total,
-                                          run_name=run_name),
+                                          run_name=run_name,
+                                          episode_filename=self._episode_filename()),
                 title=f"Training monitor - {run_name}",
                 total_steps=total, on_stop=self.stop)
         except Exception as e:
@@ -316,6 +416,61 @@ class ResidualTrainerGUI:
             self.freerun_frame.pack_forget()
         else:
             self.freerun_frame.pack(side="left")
+
+    def _sync_backend(self):
+        """Make backend-specific controls honest instead of merely ignored."""
+        backend = self.backend_var.get()
+        if backend not in ("cosim", "residual"):
+            backend = "cosim"
+            self.backend_var.set(backend)
+        if self._settings_backend in ("cosim", "residual"):
+            self._net_arch_by_backend[self._settings_backend] = self.net_arch_var.get()
+            if hasattr(self, "reward_var"):
+                self._reward_by_backend[self._settings_backend] = self.reward_var.get()
+            if hasattr(self, "run_name_var"):
+                self._run_name_by_backend[self._settings_backend] = self.run_name_var.get()
+        self.net_arch_var.set(self._net_arch_by_backend[backend])
+        if hasattr(self, "reward_var"):
+            self.reward_var.set(self._reward_by_backend[backend])
+        if hasattr(self, "run_name_var"):
+            self.run_name_var.set(self._run_name_by_backend[backend])
+        self._settings_backend = backend
+        if backend == "cosim":
+            if self.algo_var.get() != "ppo":
+                self.algo_var.set("ppo")
+            if getattr(self, "_panel_state_key", None) != self._algo_state_key():
+                self._swap_algo_panel()
+            self.algo_box.configure(state="disabled")
+            self.runup_speed_entry.configure(state="normal")
+            self.reward_combo.configure(values=COSIM_REWARDS)
+            if self.reward_var.get() == "normalized":
+                self.reward_var.set("v6.0")
+            self.resume_label.configure(text="(none)" if not self.resume_var.get()
+                                        else os.path.basename(self.resume_var.get()))
+            self.resume_button.configure(state="normal")
+            self.calibrate_button.configure(state="disabled")
+            for row in self._residual_only_rows:
+                row.pack_forget()
+            self.backend_note_var.set(
+                "Co-sim PPO: straight line, full pedal, fixed grip; 35x64 past-frame obs "
+                "and two bounded axle-release actions at 100 Hz.")
+        else:
+            if getattr(self, "_panel_state_key", None) != self._algo_state_key():
+                self._swap_algo_panel()
+            self.algo_box.configure(state="readonly")
+            self.runup_speed_entry.configure(state="disabled")
+            self.reward_combo.configure(values=tuple(PRESETS))
+            self.resume_label.configure(text="(none)" if not self.resume_var.get()
+                                        else os.path.basename(self.resume_var.get()))
+            self.resume_button.configure(state="normal")
+            self.calibrate_button.configure(state="normal")
+            for row in self._residual_only_rows:
+                if not row.winfo_manager():
+                    row.pack(fill="x", padx=6, pady=4, before=self.reward_row)
+            self._sync_determinism_row()
+            self.backend_note_var.set(
+                "Residual in-car backend: legacy comparison path with pedal, grip, "
+                "corner, calibration, SAC/PPO, and optional frame stepping.")
 
     def _build_simulator_tab(self, pad):
         cfg = load_sim_config(SETTINGS_PATH)
@@ -620,10 +775,11 @@ class ResidualTrainerGUI:
         row = ttk.LabelFrame(t, text="Trained models")
         row.pack(fill="both", expand=True, **pad)
 
-        cols = ("run_name", "algo", "model", "best_avg_g")
+        cols = ("run_name", "algo", "model", "interface", "best_avg_g")
         self.output_tree = ttk.Treeview(row, columns=cols, show="headings", height=10)
-        for c, label, w in (("run_name", "Run", 200), ("algo", "Algo", 60),
-                           ("model", "Car", 100), ("best_avg_g", "Best avg_g", 90)):
+        for c, label, w in (("run_name", "Run", 190), ("algo", "Algo", 55),
+                           ("model", "Car", 80), ("interface", "Deploy contract", 165),
+                           ("best_avg_g", "Best avg_g", 85)):
             self.output_tree.heading(c, text=label)
             self.output_tree.column(c, width=w)
         self.output_tree.pack(side="left", fill="both", expand=True, padx=6, pady=4)
@@ -672,7 +828,8 @@ class ResidualTrainerGUI:
             self._output_runs[run.run_name] = run
             g = f"{run.best_avg_g:.3f}" if run.best_avg_g is not None else "--"
             self.output_tree.insert("", "end", iid=run.run_name,
-                                    values=(run.run_name, run.algo, run.model, g))
+                                    values=(run.run_name, run.algo, run.model,
+                                            run.deployment_interface, g))
         log.info("output tab: %d finished run(s) found", len(self._output_runs))
 
     def _selected_run(self):
@@ -709,8 +866,26 @@ class ResidualTrainerGUI:
         close -- cheap enough to do often, and doing it on launch means a run
         that crashes still leaves its settings behind."""
         values = {
+            "backend": self.backend_var.get(),
             "algo": self.algo_var.get(),
-            "net_arch": self.net_arch_var.get(),
+            "cosim_net_arch": (self.net_arch_var.get()
+                               if self.backend_var.get() == "cosim"
+                               else self._net_arch_by_backend["cosim"]),
+            "residual_net_arch": (self.net_arch_var.get()
+                                  if self.backend_var.get() == "residual"
+                                  else self._net_arch_by_backend["residual"]),
+            "cosim_reward": (self.reward_var.get()
+                             if self.backend_var.get() == "cosim"
+                             else self._reward_by_backend["cosim"]),
+            "residual_reward": (self.reward_var.get()
+                                if self.backend_var.get() == "residual"
+                                else self._reward_by_backend["residual"]),
+            "cosim_run_name": (self.run_name_var.get()
+                               if self.backend_var.get() == "cosim"
+                               else self._run_name_by_backend["cosim"]),
+            "residual_run_name": (self.run_name_var.get()
+                                  if self.backend_var.get() == "residual"
+                                  else self._run_name_by_backend["residual"]),
             "speeds": self.speeds_var.get(),
             "pedal_random": self.pedal_random_var.get(),
             "pedal_spec": self.pedal_spec_var.get(),
@@ -719,8 +894,10 @@ class ResidualTrainerGUI:
             "reward": self.reward_var.get(),
             "deterministic": self.determ_var.get(),
             "train_speed_factor": self.train_speed_var.get(),
+            "runup_speed_factor": self.runup_speed_var.get(),
             "run_name": self.run_name_var.get(),
             "total_steps": self.total_steps_var.get(),
+            "seed": self.seed_var.get(),
             "car_model": self.car_model_var.get(),
             "car_trim": self.car_trim_var.get(),
             "car_custom": self.car_custom_var.get(),
@@ -729,7 +906,7 @@ class ResidualTrainerGUI:
         }
         gui_state.remember_run(self.state, values)
         if self.field_vars:
-            gui_state.remember_algo(self.state, self.algo_var.get(),
+            gui_state.remember_algo(self.state, self._algo_state_key(),
                                     {k: v.get() for k, v in self.field_vars.items()})
         try:
             gui_state.save(self.state, GUI_STATE_PATH)
@@ -749,16 +926,17 @@ class ResidualTrainerGUI:
         # Whatever is on screen belongs to the algorithm that WAS selected, so
         # bank it before rebuilding -- otherwise switching to the other
         # algorithm and back silently restores defaults over tuned values.
-        if self.field_vars and getattr(self, "_panel_algo", None):
-            gui_state.remember_algo(self.state, self._panel_algo,
+        if self.field_vars and getattr(self, "_panel_state_key", None):
+            gui_state.remember_algo(self.state, self._panel_state_key,
                                     {k: v.get() for k, v in self.field_vars.items()})
         for child in self.algo_panel.winfo_children():
             child.destroy()
         self.field_vars = {}
         self._panel_algo = self.algo_var.get()
+        self._panel_state_key = self._algo_state_key()
         defaults = SAC_DEFAULTS if self.algo_var.get() == "sac" else PPO_DEFAULTS
         labels = SAC_LABELS if self.algo_var.get() == "sac" else PPO_LABELS
-        values = gui_state.algo_values(self.state, self._panel_algo, defaults)
+        values = gui_state.algo_values(self.state, self._panel_state_key, defaults)
         for key, default in defaults.items():
             frame = ttk.Frame(self.algo_panel)
             frame.pack(side="left", padx=4)
@@ -774,6 +952,10 @@ class ResidualTrainerGUI:
             gui_help.attach(entry, algo, key)
             self.field_vars[key] = var
 
+    def _algo_state_key(self):
+        backend = self.backend_var.get() if hasattr(self, "backend_var") else "residual"
+        return "cosim_ppo" if backend == "cosim" else self.algo_var.get()
+
     def _toggle_pedal_entry(self):
         self.pedal_entry.configure(state="normal" if self.pedal_random_var.get() else "disabled")
 
@@ -785,6 +967,7 @@ class ResidualTrainerGUI:
 
     def _collect_settings(self):
         settings = dict(
+            backend=self.backend_var.get(),
             algo=self.algo_var.get(),
             speeds=self.speeds_var.get(),
             pedal_random=self.pedal_random_var.get(),
@@ -801,6 +984,8 @@ class ResidualTrainerGUI:
             reward=self.reward_var.get(),
             deterministic=self.determ_var.get(),
             train_speed_factor=self.train_speed_var.get(),
+            runup_speed_factor=self.runup_speed_var.get(),
+            seed=self.seed_var.get(),
         )
         for key, var in self.field_vars.items():
             settings[key] = var.get()
@@ -809,7 +994,91 @@ class ResidualTrainerGUI:
     def _run_dir(self):
         return os.path.join(HERE, "runs", self.run_name_var.get())
 
+    def _find_active_runs(self, only_run=None):
+        """Return [(run_name, backend, pid)] for live trainer PID markers."""
+        try:
+            import psutil
+        except ImportError:
+            return []
+        found = []
+        try:
+            entries = [entry for entry in os.scandir(RUNS_DIR) if entry.is_dir()]
+        except OSError:
+            return found
+        for entry in entries:
+            if only_run is not None and entry.name != only_run:
+                continue
+            pid_path = os.path.join(entry.path, "pid.txt")
+            try:
+                with open(pid_path, encoding="ascii") as fh:
+                    pid = int(fh.read().strip())
+            except (OSError, ValueError):
+                continue
+            if not psutil.pid_exists(pid):
+                continue
+            try:
+                command = " ".join(psutil.Process(pid).cmdline()).lower()
+            except (psutil.Error, OSError):
+                command = ""
+            if (not command or
+                    ("train_cosim.py" not in command and
+                     "train_residual.py" not in command)):
+                continue
+            backend = ("cosim" if os.path.isfile(
+                os.path.join(entry.path, "config.json")) else "residual")
+            found.append((entry.name, backend, pid))
+        return sorted(found)
+
+    def _reattach_active_run(self):
+        active = self._find_active_runs()
+        if not active:
+            return
+        run_name, backend, pid = active[0]
+        if len(active) > 1:
+            log.warning("multiple active trainer PID files found: %s", active)
+        self._active_run = run_name
+        self._active_backend = backend
+        self.backend_var.set(backend)
+        self._sync_backend()
+        self.run_name_var.set(run_name)
+        self._run_name_by_backend[backend] = run_name
+        self.status_var.set(f"attached to active run (pid {pid})")
+        self._set_running_ui(True)
+        log.info("reattached GUI controls to run=%s backend=%s pid=%d",
+                 run_name, backend, pid)
+
+    def _set_running_ui(self, running):
+        self.start_button.configure(state="disabled" if running else "normal")
+        self.backend_box.configure(state="disabled" if running else "readonly")
+        self.run_name_entry.configure(state="disabled" if running else "normal")
+        if not running:
+            self._sync_backend()
+
+    def _advance_after_run(self):
+        """Move co-sim to a fresh immutable name after any terminal exit."""
+        if self._active_backend == "cosim":
+            fresh = next_run_name(RUNS_DIR)
+            self._run_name_by_backend["cosim"] = fresh
+            self.run_name_var.set(fresh)
+        self._active_run = None
+        self._active_backend = None
+
+    def _episode_filename(self):
+        backend = self._active_backend or self.backend_var.get()
+        return "episode_log.csv" if backend == "cosim" else "episode_log_env0.csv"
+
     def start(self):
+        if self.proc is not None and self.proc.poll() is None:
+            messagebox.showwarning("Training already active",
+                                   "Stop the active run before starting another.")
+            return
+        active = self._find_active_runs()
+        if active:
+            messagebox.showwarning(
+                "Training already active",
+                f"Run {active[0][0]} is still active (PID {active[0][2]}). "
+                "Use GRACEFUL STOP before starting another.")
+            return
         settings = self._collect_settings()
         self.save_state()
         log.info("START pressed: settings=%s", settings)
@@ -819,7 +1088,8 @@ class ResidualTrainerGUI:
             messagebox.showerror("Invalid settings", "\n".join(problems))
             return
 
-        abs_problem = getattr(self, "_car_abs_problem", None)
+        abs_problem = (getattr(self, "_car_abs_problem", None)
+                       if settings.get("backend") == "residual" else None)
         if abs_problem:
             log.warning("START refused: selected car cannot run in-car training: %s",
                         abs_problem)
@@ -828,13 +1098,22 @@ class ResidualTrainerGUI:
 
         sim_cfg = self._collect_sim_config()
         sim_problems = validate_sim_config(sim_cfg)
+        if settings.get("backend") == "cosim" and sim_cfg.game != "tech":
+            sim_problems.append("co-sim training currently requires BeamNG.tech")
         if sim_problems:
             log.warning("START refused: invalid simulator settings: %s", sim_problems)
             messagebox.showerror("Invalid simulator settings (Simulator tab)",
                                  "\n".join(sim_problems))
             self.notebook.select(self.sim_tab)
             return
+        try:
+            require_beamng_available(game=sim_cfg.game)
+        except RuntimeError as exc:
+            messagebox.showwarning("BeamNG is in use", str(exc))
+            return
         save_sim_config(sim_cfg, SETTINGS_PATH)  # train_residual.py reads this by default
+        settings["headless"] = sim_cfg.headless
+        settings["port"] = sim_cfg.port
 
         game_version = detect_game_version(sim_cfg.game, sim_cfg.game_folder)
         compat = check_compat(game_version, _BNG_VER)
@@ -851,21 +1130,29 @@ class ResidualTrainerGUI:
         elif compat.ok is not True:
             log.warning("proceeding despite compat check: %s", compat.message)
 
-        pid_path = os.path.join(self._run_dir(), "pid.txt")
-        if os.path.exists(pid_path):
-            log.warning("START refused: %s exists (run already active or stale)", pid_path)
-            messagebox.showerror("Run already active",
-                                 f"{pid_path} exists -- a training process for this "
-                                 f"run name may already be running. Choose a different "
-                                 f"run name, or delete that file if it is stale.")
+        if settings.get("backend") == "cosim" and os.path.exists(self._run_dir()):
+            messagebox.showerror(
+                "Run name already exists",
+                f"{self._run_dir()} already exists. Co-sim runs are immutable; "
+                "choose a new run name.")
             return
 
-        stop_path = os.path.join(HERE, "STOP_TRAINING.txt")
+        stop_path = os.path.join(self._run_dir(), "STOP_TRAINING.txt")
         if os.path.exists(stop_path):
             os.remove(stop_path)
             log.info("removed stale stop file %s", stop_path)
+        settings["stop_file"] = stop_path
 
-        cmd = build_cmd(settings)
+        if settings.get("backend") == "cosim":
+            config_dir = os.path.join(HERE, ".gui-configs")
+            os.makedirs(config_dir, exist_ok=True)
+            config_path = os.path.join(config_dir,
+                                       str(settings["run_name"]) + ".json")
+            with open(config_path, "w", encoding="utf-8") as fh:
+                json.dump(build_cosim_config(settings), fh, indent=2)
+            cmd = build_cosim_cmd(config_path)
+        else:
+            cmd = build_cmd(settings)
         creationflags = subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0
         try:
             self.proc = subprocess.Popen(cmd, cwd=HERE, creationflags=creationflags)
@@ -874,10 +1161,12 @@ class ResidualTrainerGUI:
             messagebox.showerror("Launch failed", f"{e}\n\nSee logs\\gui.log")
             return
         self._active_run = settings["run_name"]
+        self._active_backend = settings.get("backend", "residual")
         self._log_seen = False
         self._last_parse_err = None
         log.info("launched trainer pid=%d run=%s cmd=%s", self.proc.pid, self._active_run, cmd)
         self.status_var.set(f"running (pid {self.proc.pid})")
+        self._set_running_ui(True)
         self._open_monitor(settings)
 
     def _check_car_has_ml_abs(self, model_name, pc_name):
@@ -934,6 +1223,11 @@ class ResidualTrainerGUI:
             messagebox.showerror("Invalid simulator settings (Simulator tab)",
                                  "\n".join(sim_problems))
             self.notebook.select(self.sim_tab)
+            return
+        try:
+            require_beamng_available(game=sim_cfg.game)
+        except RuntimeError as exc:
+            messagebox.showwarning("BeamNG is in use", str(exc))
             return
         save_sim_config(sim_cfg, SETTINGS_PATH)   # reference_runner.py reads this
 
@@ -1113,7 +1407,15 @@ class ResidualTrainerGUI:
         self._calibration = None
 
     def stop(self):
-        stop_path = os.path.join(HERE, "STOP_TRAINING.txt")
+        run_name = self._active_run or self.run_name_var.get()
+        run_dir = os.path.join(HERE, "runs", str(run_name))
+        launched_alive = self.proc is not None and self.proc.poll() is None
+        detached_alive = bool(self._find_active_runs(only_run=run_name))
+        if not launched_alive and not detached_alive:
+            self.status_var.set("no active training process")
+            return
+        stop_path = os.path.join(run_dir, "STOP_TRAINING.txt")
+        os.makedirs(os.path.dirname(stop_path), exist_ok=True)
         with open(stop_path, "w") as fh:
             fh.write("stop")
         log.info("GRACEFUL STOP pressed: wrote %s (trainer pid=%s)",
@@ -1121,18 +1423,39 @@ class ResidualTrainerGUI:
         self.status_var.set("stop requested -- waiting for graceful save")
 
     def _on_trainer_exit(self, code):
-        train_log = os.path.join(HERE, "runs", str(self._active_run), "train.log")
+        run_name = self._active_run
+        backend = self._active_backend
+        run_dir = os.path.join(HERE, "runs", str(run_name))
+        train_log = os.path.join(run_dir, "train.log")
+        if backend == "cosim" and os.path.isdir(run_dir):
+            state_path = os.path.join(run_dir, "run_state.json")
+            state = update_run_state(
+                state_path, gui_observed_exit_code=int(code),
+                gui_observed_exit_utc=utc_now())
+            if code != 0 and state.get("status") in ("starting", "training"):
+                update_run_state(
+                    state_path, status="terminated",
+                    shutdown_reason="process_exit_code_%s" % code,
+                    exit_code=int(code))
+            append_jsonl(os.path.join(run_dir, "run_events.jsonl"), {
+                "event": "gui_observed_process_exit", "utc": utc_now(),
+                "exit_code": int(code), "run_name": run_name,
+            })
         if code == 0:
-            log.info("trainer exited cleanly (run=%s)", self._active_run)
+            log.info("trainer exited cleanly (run=%s)", run_name)
             self.status_var.set("finished")
+            self._advance_after_run()
+            self._set_running_ui(False)
             return
         tail = tail_lines(train_log, TRAIN_LOG_TAIL)
         log.error("trainer exited with code %s (run=%s); last %d lines of %s:\n%s",
-                  code, self._active_run, len(tail), train_log, "\n".join(tail))
+                  code, run_name, len(tail), train_log, "\n".join(tail))
         self.status_var.set(f"exited (code {code})")
+        self._advance_after_run()
+        self._set_running_ui(False)
         messagebox.showerror(
             f"Trainer exited (code {code})",
-            f"Run '{self._active_run}' died. Last lines of train.log:\n\n"
+            f"Run '{run_name}' died. Last lines of train.log:\n\n"
             + ("\n".join(tail) if tail else "(no train.log found)")
             + "\n\nFull detail: logs\\gui.log and that run's train.log")
 
@@ -1142,8 +1465,14 @@ class ResidualTrainerGUI:
             if code is not None:
                 self.proc = None
                 self._on_trainer_exit(code)
+        elif self._active_run is not None and not self._find_active_runs(
+                only_run=self._active_run):
+            if str(self.status_var.get()).startswith("attached"):
+                self.status_var.set("attached run ended")
+                self._advance_after_run()
+                self._set_running_ui(False)
 
-        log_path = os.path.join(self._run_dir(), "episode_log_env0.csv")
+        log_path = os.path.join(self._run_dir(), self._episode_filename())
         if os.path.exists(log_path):
             if not self._log_seen:
                 self._log_seen = True

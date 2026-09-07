@@ -143,7 +143,9 @@ def summarize(rows, total_steps=0, run_name=""):
     # Rate from recent episodes only: the run's lifetime average would be
     # dragged by the first episode, which includes the game boot.
     recent = rows[-RATE_WINDOW:]
-    wall = sum(_f(r, "wall_clock_s") for r in recent)
+    # Residual logs use wall_clock_s; the co-sim contract calls the same
+    # per-episode measurement wall_s.
+    wall = sum(_f(r, "wall_clock_s", _f(r, "wall_s")) for r in recent)
     steps = sum(_i(r, "steps") for r in recent)
     steps_per_sec = (steps / wall) if wall > 0 and steps else None
 

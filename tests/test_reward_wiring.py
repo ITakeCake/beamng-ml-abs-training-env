@@ -17,7 +17,12 @@ import abs_env
 import abs_env_incar
 from reward_spec import RewardSpec
 from calibration import CalibrationTable, config_key, summarize
-from abs_env_residual import install_reward_spec, restore_reward_defaults, resolve_refs
+from abs_env_residual import (
+    ABSLearningEnvResidual,
+    install_reward_spec,
+    restore_reward_defaults,
+    resolve_refs,
+)
 
 REFS = (1.0315, 1.1884)
 
@@ -68,6 +73,45 @@ def test_normalized_shape_raises_when_refs_are_unavailable():
     install_reward_spec(RewardSpec.normalized(), lambda: None)
     with pytest.raises(ValueError):
         abs_env_incar._terminal_g_shape(1.0)
+
+
+def test_installing_v6_routes_dense_and_terminal_calls_correctly():
+    state = {"episode": 1, "step": 1, "g": 0.9}
+    spec = RewardSpec.v6()
+    install_reward_spec(
+        spec,
+        lambda: None,
+        episode_step_provider=lambda: (state["episode"], state["step"]),
+        dt_provider=lambda: 0.01,
+        step_g_provider=lambda: state["g"],
+    )
+
+    # First call under a new step key is the parent's dense reward call. The
+    # passed value is intentionally bogus: the signed-G provider must win.
+    assert abs_env_incar._terminal_g_shape(999.0) == pytest.approx(0.009)
+    # A repeated key only occurs when the parent scores measured terminal avg G.
+    assert abs_env_incar._terminal_g_shape(1.2) == pytest.approx(30.0)
+    assert abs_env_incar.PER_STEP_K == 1.0
+    assert abs_env_incar.YAW_BONUS_K_STEP == 0.0
+    assert abs_env_incar.YAW_PEN_K_TERMINAL == 0.0
+
+    state.update(episode=2, step=1, g=1.5)
+    # A new episode clears the old rolling window.
+    assert abs_env_incar._terminal_g_shape(999.0) == pytest.approx(0.015)
+
+
+def test_installing_v6_requires_state_and_dt_providers():
+    with pytest.raises(ValueError, match="episode/step and dt"):
+        install_reward_spec(RewardSpec.v6(), lambda: None)
+
+
+def test_residual_v6_applies_stability_only_to_a_successful_stop():
+    env = object.__new__(ABSLearningEnvResidual)
+    env._reward_spec = RewardSpec.v6()
+    env.ep_yaw_abs_sum = 0.14
+    assert env._terminal_reward_adjustment("STOP") == pytest.approx(-0.75)
+    assert env._terminal_reward_adjustment("CRASH") == 0.0
+    assert env._terminal_reward_adjustment("TIMEOUT") == -30.0
 
 
 # --- resolve_refs ---------------------------------------------------------

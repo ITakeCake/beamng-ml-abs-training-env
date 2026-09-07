@@ -16,6 +16,29 @@ def residual_to_brakes(action, pedal):
     return (front, front, rear, rear)   # (fr, fl, rr, rl) — axle-locked
 
 
+def wheel_release_to_brakes(action, pedal):
+    """[fr, fl, rr, rl] release in [0,1] + pedal -> (fr, fl, rr, rl), no axle lock."""
+    out = []
+    for i in range(4):
+        rel = min(1.0, max(0.0, float(action[i])))
+        out.append(min(1.0, max(BRAKE_FLOOR, float(pedal) * (1.0 - rel))))
+    return tuple(out)
+
+
+WHEEL_MODES = ("axle", "independent")
+ACT_DIM_FOR = {"axle": 2, "independent": 4}
+
+
+def axle_view(vec):
+    """(front, rear) from either a 2-vector or a 4-vector (fr, fl, rr, rl)."""
+    vals = [float(v) for v in vec]
+    if len(vals) >= 4:
+        return ((vals[0] + vals[1]) * 0.5, (vals[2] + vals[3]) * 0.5)
+    if len(vals) == 2:
+        return (vals[0], vals[1])
+    return (float("nan"), float("nan"))
+
+
 def parse_speeds(text):
     parts = [p.strip() for p in str(text).split(",")]
     if not parts or any(p == "" for p in parts):

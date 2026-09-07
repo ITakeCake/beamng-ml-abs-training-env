@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import shutil
 
 from jbeam_generator import find_abs_slot_types, generate_parent_jbeam, generate_model_jbeam
 from vehicle_scanner import scan_models
@@ -67,6 +68,35 @@ def _models_jbeam_path(run_info, out_mod_dir):
     return os.path.join(out_mod_dir, "vehicles", run_info.model, "ml_abs_models.jbeam")
 
 
+def _deployment_spec(run_info):
+    interface = getattr(run_info, "deployment_interface",
+                        "legacy_incar_brake4_v1")
+    if interface in ("cosim_axle_release_v1", "cosim_axle_release_v2"):
+        if run_info.algo != "ppo":
+            return None, "co-sim deployment currently supports PPO checkpoints only"
+        return {
+            "head": "ppo_tanh_release01", "controller": "MTB-ML-ABS-CoSim",
+            "interface": interface, "control_hz": 100,
+        }, None
+    if interface == "legacy_incar_brake4_v1":
+        return {
+            "head": "ppo_clip01" if run_info.algo == "ppo" else "sac_tanh01",
+            "controller": "MTB-ML-ABS", "interface": interface,
+            "control_hz": 200,
+        }, None
+    if interface == "residual_axle_release_v1":
+        return None, (
+            "This residual checkpoint uses 28 observations x 16 frames and two "
+            "axle-release actions. The shipped four-wheel controller expects "
+            "27 x 16 and four brake actions, so exporting it would produce an "
+            "invalid in-game controller. Training is valid; deployment needs a "
+            "dedicated residual controller.")
+    return None, (
+        "This checkpoint predates the bounded PPO action-interface stamp "
+        f"({interface}). It cannot be safely inferred as deployable; start a new "
+        "bounded PPO run or keep it for offline comparison.")
+
+
 def export_model_to_game(run_info, out_mod_dir, python_exe=None):
     """Runs export_policy_weights.py against this run's checkpoint, then
     merges a child jbeam part in -- read-merge-write, so exporting model B
@@ -75,14 +105,30 @@ def export_model_to_game(run_info, out_mod_dir, python_exe=None):
     weights_lua = os.path.join(out_mod_dir, "lua", "vehicle", "controller",
                                weights_name + ".lua")
     os.makedirs(os.path.dirname(weights_lua), exist_ok=True)
-    head = "ppo_clip01" if run_info.algo == "ppo" else "sac_tanh01"
+    spec, problem = _deployment_spec(run_info)
+    if problem:
+        return False, problem
     cmd = [python_exe or sys.executable, EXPORTER_PATH,
           "--ckpt", os.path.join(run_info.run_dir, "final.zip"),
           "--vecnorm", os.path.join(run_info.run_dir, "vecnormalize.pkl"),
-          "--algo", run_info.algo, "--head", head, "--out", weights_lua]
+          "--algo", run_info.algo, "--head", spec["head"],
+          "--interface", spec["interface"],
+          "--control-hz", str(spec["control_hz"]), "--out", weights_lua]
     ok, msg = _run_exporter(cmd)
     if not ok:
         return False, msg
+
+    # Export is self-contained even if the user has not clicked Install/Update
+    # Assets since this controller was added.
+    controller_name = spec["controller"] + ".lua"
+    controller_src = os.path.join(
+        HERE, "assets", "mods", "mtb_ml_abs", "lua", "vehicle",
+        "controller", controller_name)
+    controller_dst = os.path.join(
+        out_mod_dir, "lua", "vehicle", "controller", controller_name)
+    if not os.path.isfile(controller_src):
+        return False, "required controller asset is missing: " + controller_src
+    shutil.copy2(controller_src, controller_dst)
 
     models_path = _models_jbeam_path(run_info, out_mod_dir)
     os.makedirs(os.path.dirname(models_path), exist_ok=True)
@@ -90,7 +136,9 @@ def export_model_to_game(run_info, out_mod_dir, python_exe=None):
     if os.path.isfile(models_path):
         with open(models_path, encoding="utf-8") as fh:
             existing = json.load(fh)
-    new_part = json.loads(generate_model_jbeam(run_info.model, run_info.run_name, weights_name))
+    new_part = json.loads(generate_model_jbeam(
+        run_info.model, run_info.run_name, weights_name,
+        controller=spec["controller"]))
     existing.update(new_part)
     with open(models_path, "w", encoding="utf-8") as fh:
         json.dump(existing, fh, indent=2)

@@ -9,7 +9,9 @@ Format (reverse-engineered from the deployed mtb_ml_weights.lua):
   M.obs_mean_s / M.obs_var_s        VecNormalize stats over the FULL STACKED obs
   M.layers = { {rows,cols, act="relu"|nil, b_s=[==[...]==], W_s=[==[...]==]}, ... }
   W row-major: (r,c) at flat (r-1)*cols+c.  Floats %.9g space-separated.
-NEW (PPO): M.head = "sac_tanh01" | "ppo_clip01" | "ppo_axle"; M.axle_cap for ppo_axle.
+NEW (PPO): M.head also supports ``ppo_tanh_release01`` for the bounded
+two-axle release policy. ``M.interface`` and ``M.control_hz`` tell the Lua
+loader which observation/action contract the network was trained against.
 The controller applies the head AFTER the MLP (SAC path = tanh+unscale->[0,1]).
 
 Usage:
@@ -44,6 +46,8 @@ def extract_layers(ckpt, algo):
         from stable_baselines3 import PPO
         model = PPO.load(ckpt, device="cpu")
         pol = model.policy
+        if getattr(pol, "activation_fn", None) is not th.nn.ReLU:
+            raise ValueError("export supports PPO ReLU policies only")
         seq = list(pol.mlp_extractor.policy_net)          # Linear/ReLU alternating
         layers = []
         for m in seq:
@@ -56,6 +60,9 @@ def extract_layers(ckpt, algo):
         from stable_baselines3 import SAC
         model = SAC.load(ckpt, device="cpu")
         actor = model.policy.actor
+        if not all(isinstance(module, (th.nn.Linear, th.nn.ReLU))
+                   for module in actor.latent_pi):
+            raise ValueError("export supports SAC Linear/ReLU actors only")
         layers = []
         for m in actor.latent_pi:
             if isinstance(m, th.nn.Linear):
@@ -65,7 +72,9 @@ def extract_layers(ckpt, algo):
         return layers, model
 
 
-def emit_lua(layers, mean, var, clip_obs, eps, head, axle_cap, out_path, src):
+def emit_lua(layers, mean, var, clip_obs, eps, head, axle_cap, out_path, src,
+             interface="legacy_incar_brake4_v1", control_hz=200,
+             latent_bound=0.0):
     obs_dim = len(mean)
     act_dim = layers[-1][0].shape[0]
     L = []
@@ -78,7 +87,10 @@ def emit_lua(layers, mean, var, clip_obs, eps, head, axle_cap, out_path, src):
     L.append("M.clip_obs = %g" % clip_obs)
     L.append("M.eps = %g" % eps)
     L.append("M.head = %q" % head if False else 'M.head = "%s"' % head)
+    L.append('M.interface = "%s"' % interface)
+    L.append("M.control_hz = %d" % int(control_hz))
     L.append("M.axle_cap = %g" % axle_cap)
+    L.append("M.latent_bound = %g" % latent_bound)   # 0 = none; else b*tanh(mu/b) before head
     L.append("M.obs_mean_s = [==[%s]==]" % fmt(mean))
     L.append("M.obs_var_s = [==[%s]==]" % fmt(var))
     L.append("M.layers = {")
@@ -115,13 +127,20 @@ def parse_blob(path):
     return mean, var, clip_obs, eps, layers
 
 
-def lua_forward(obs_raw, mean, var, clip_obs, eps, layers, head):
+def parse_latent_bound(path):
+    m = re.search(r"M\.latent_bound = ([\d.eE+-]+)", open(path).read())
+    return float(m.group(1)) if m else 0.0
+
+
+def lua_forward(obs_raw, mean, var, clip_obs, eps, layers, head, latent_bound=0.0):
     x = np.clip((obs_raw - mean) / np.sqrt(var + eps), -clip_obs, clip_obs)
     for (W, b, act) in layers:
         x = W @ x + b
         if act == "relu":
             x = np.maximum(x, 0.0)
-    if head == "sac_tanh01":
+    if head == "ppo_tanh_release01" and latent_bound > 0.0:
+        x = latent_bound * np.tanh(x / latent_bound)
+    if head in ("sac_tanh01", "ppo_tanh_release01"):
         return (np.tanh(x) + 1.0) * 0.5
     if head == "ppo_clip01":
         return np.clip(x, 0.0, 1.0)
@@ -135,7 +154,14 @@ def main():
     ap.add_argument("--ckpt", required=True)
     ap.add_argument("--vecnorm", required=True)
     ap.add_argument("--algo", choices=["ppo", "sac"], default="ppo")
-    ap.add_argument("--head", choices=["sac_tanh01", "ppo_clip01", "ppo_axle"], required=True)
+    ap.add_argument("--head", choices=["sac_tanh01", "ppo_clip01", "ppo_axle",
+                                       "ppo_tanh_release01"], required=True)
+    ap.add_argument("--interface",
+                    choices=["legacy_incar_brake4_v1", "cosim_axle_release_v1",
+                             "cosim_wheel_release_v1", "cosim_axle_release_v2",
+                             "cosim_wheel_release_v2"],
+                    default="legacy_incar_brake4_v1")
+    ap.add_argument("--control-hz", type=int, default=None)
     ap.add_argument("--axle-cap", type=float, default=1.0)
     ap.add_argument("--out", required=True)
     ap.add_argument("--n-parity", type=int, default=256)
@@ -143,13 +169,35 @@ def main():
 
     mean, var, clip_obs, eps = load_vecnorm(args.vecnorm)
     layers, model = extract_layers(args.ckpt, args.algo)
-    obs_dim, act_dim = emit_lua(layers, mean, var, clip_obs, eps,
-                                args.head, args.axle_cap, args.out, args.ckpt)
+    if args.head == "ppo_tanh_release01":
+        from bounded_ppo import has_bounded_action_interface
+        if not has_bounded_action_interface(model):
+            raise SystemExit(
+                "ppo_tanh_release01 requires a bounded PPO checkpoint using "
+                "ppo_unit_tanh_release_v1; refusing a legacy Gaussian model")
+    control_hz = args.control_hz or (100 if args.interface.startswith("cosim_")
+                                     else 200)
+    expected = {"cosim_axle_release_v1": (13, 2),
+                "cosim_wheel_release_v1": (15, 4),
+                "cosim_axle_release_v2": (2240, 2),   # 35 x 64 stacked frames
+                "cosim_wheel_release_v2": (2240, 4)}.get(args.interface, (None, None))
+    actual = (len(mean), layers[-1][0].shape[0])
+    if expected[0] is not None and actual != expected:
+        raise SystemExit(
+            "checkpoint/VecNormalize dimensions %s do not match interface %s "
+            "(expected %s)" % (actual, args.interface, expected))
+    latent_bound = (float(getattr(model.policy, "latent_bound", 0.0))
+                    if args.head == "ppo_tanh_release01" else 0.0)
+    obs_dim, act_dim = emit_lua(
+        layers, mean, var, clip_obs, eps, args.head, args.axle_cap,
+        args.out, args.ckpt, interface=args.interface, control_hz=control_hz,
+        latent_bound=latent_bound)
     print("emitted %s  (obs %d -> act %d, %d layers, head=%s)" %
           (args.out, obs_dim, act_dim, len(layers), args.head))
 
     # parity: SB3 (deterministic) vs re-parsed blob forward, on random NORMALIZED obs
     pm, pv, pc, pe, pl = parse_blob(args.out)
+    pb = parse_latent_bound(args.out)
     rng = np.random.default_rng(0)
     raw = rng.normal(loc=mean, scale=np.sqrt(var + eps), size=(args.n_parity, obs_dim))
     worst = 0.0
@@ -161,15 +209,22 @@ def main():
                 deterministic=True).numpy().ravel().astype(np.float64)
         if args.head == "sac_tanh01":
             a_sb3 = (a_sb3 + 1.0) * 0.5    # SAC _predict is tanh-squashed [-1,1]
+        elif args.head == "ppo_tanh_release01":
+            # The bounded PPO policy's _predict already returns physical [0,1]
+            # releases. The emitted Lua applies the transform to its raw head.
+            pass
         elif args.head == "ppo_clip01":
             a_sb3 = np.clip(a_sb3, 0.0, 1.0)
         else:
             a_sb3 = np.clip(a_sb3, -1.0, 1.0)
-        a_lua = lua_forward(raw[i], pm, pv, pc, pe, pl, args.head)
+        a_lua = lua_forward(raw[i], pm, pv, pc, pe, pl, args.head, pb)
         worst = max(worst, float(np.max(np.abs(a_sb3 - a_lua))))
     print("PARITY (SB3 vs emitted-blob forward, %d random obs): max abs diff = %.3g" %
           (args.n_parity, worst))
-    print("PASS" if worst < 1e-5 else "FAIL — investigate before deploying!")
+    if worst < 1e-5:
+        print("PASS")
+    else:
+        raise SystemExit("FAIL -- parity mismatch; refusing deployment")
 
 
 if __name__ == "__main__":

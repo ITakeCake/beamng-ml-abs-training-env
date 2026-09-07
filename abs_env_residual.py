@@ -2,8 +2,9 @@
 
 Action (2 floats, Box[0,1]): [front_release, rear_release]. zero action = full-pedal
 slam = the lockup baseline; the model learns WHEN/HOW MUCH to release. Axle-locked
-(FL==FR, RL==RR) so brakes cannot yaw-spin the car (PPO_V2 lesson). Reward v5.0
-inherited untouched. Obs 27 -> 28: live episode pedal appended (same pattern as
+(FL==FR, RL==RR) so brakes cannot yaw-spin the car (PPO_V2 lesson). Reward
+presets are installed without editing the protected parent. Obs 27 -> 28: live
+episode pedal appended (same pattern as
 ABSLearningEnvAxle's split_cap channel, abs_env_axle.py:58-61).
 
 Subclass of ABSLearningEnvIncar. DO NOT EDIT abs_env.py / abs_env_incar.py (copies
@@ -111,13 +112,41 @@ _SPEC_FIELD_FOR = {
 }
 
 
-def install_reward_spec(spec, refs_provider):
+def install_reward_spec(spec, refs_provider, episode_step_provider=None,
+                        dt_provider=None, step_g_provider=None):
     """Point abs_env_incar's reward globals at `spec`. `refs_provider` is
     called at scoring time (not now) so a normalized spec picks up the
     calibration references for whatever configuration the CURRENT episode is
-    running -- speeds vary per episode, so refs cannot be bound once."""
-    def shape(g):
-        return spec.g_shape(g, refs_provider())
+    running -- speeds vary per episode, so refs cannot be bound once.
+
+    The protected parent calls the same shape function once for every dense
+    step and a second time on a successful terminal step. v6 uses that order
+    to keep its rolling accumulator stateful without copying the parent's
+    monolithic step(): a new (episode, step) key is dense scoring; a repeated
+    key is terminal scoring.
+    """
+    if spec.step_mode == "rolling_consistency":
+        if episode_step_provider is None or dt_provider is None:
+            raise ValueError(
+                "rolling reward wiring requires episode/step and dt providers")
+        tracker = spec.make_step_tracker(dt_provider())
+        last_key = [None]
+        last_episode = [None]
+
+        def shape(g):
+            episode, step = episode_step_provider()
+            key = (episode, step)
+            if key != last_key[0]:
+                if episode != last_episode[0]:
+                    tracker.reset()
+                    last_episode[0] = episode
+                last_key[0] = key
+                step_g = step_g_provider() if step_g_provider is not None else g
+                return tracker.push(step_g, refs_provider())
+            return spec.g_shape(g, refs_provider())
+    else:
+        def shape(g):
+            return spec.g_shape(g, refs_provider())
     abs_env_incar._terminal_g_shape = shape
     for name in _REWARD_NAMES:
         setattr(abs_env_incar, name, getattr(spec, _SPEC_FIELD_FOR[name]))
@@ -300,7 +329,16 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         self._pending_grip = None
         # _current_refs() can be reached before reset() draws the first value.
         self.episode_pedal = 1.0
-        install_reward_spec(self._reward_spec, self._current_refs)
+        install_reward_spec(
+            self._reward_spec,
+            self._current_refs,
+            episode_step_provider=lambda: (
+                getattr(self, "episode_count", 0),
+                getattr(self, "steps_taken", 0),
+            ),
+            dt_provider=lambda: getattr(self, "_dt", 1.0 / 200.0),
+            step_g_provider=lambda: getattr(self, "_reward_positive_g", 0.0),
+        )
         log.info("reward spec: %s (hash=%s, normalize=%s, default=%s)",
                  self._reward_spec.name, self._reward_spec.hash(),
                  self._reward_spec.normalize, self._reward_spec.is_default())
@@ -387,6 +425,18 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
     def _append_pedal(self, obs):
         return np.concatenate([np.asarray(obs, dtype=np.float32),
                                [np.float32(self.episode_pedal)]])
+
+    def _published_obs_vector(self, electrics):
+        """Remember positive deceleration before the protected parent applies
+        its historical ``abs(g)`` conversion.
+
+        v5 still receives the parent's exact value. v6's dense tracker reads
+        this side channel so acceleration in the opposite direction cannot
+        earn braking reward.
+        """
+        obs = super()._published_obs_vector(electrics)
+        self._reward_positive_g = max(0.0, float(obs[4]) / 9.81)
+        return obs
 
     def _current_refs(self):
         """Calibration references for the episode currently running. Called at
@@ -557,6 +607,13 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
             self._dump_ring("exception")
             raise
 
+        if terminated or truncated:
+            # The protected parent's TIMEOUT branch predates a fixed timeout
+            # penalty, and its STOP branch predates v6's capped stability guard.
+            # The logging overrides below apply the same adjustment to CSV and
+            # audit output.
+            reward += self._terminal_reward_adjustment(self._outcome())
+
         # The parent has just overwritten current_heading from telemetry, and
         # filled in _last_gps_speed for this step.
         self._heading.observe(self.current_heading)
@@ -581,6 +638,29 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         if terminated or truncated:
             self._log_episode_end()
         return self._append_pedal(obs), reward, terminated, truncated, info
+
+    def _terminal_reward_adjustment(self, outcome):
+        if outcome == "TIMEOUT":
+            return self._reward_spec.timeout_penalty
+        if outcome == "STOP":
+            return self._reward_spec.terminal_stability_penalty(
+                self.ep_yaw_abs_sum)
+        return 0.0
+
+    def _log_episode(self, outcome, avg_g, terminal_rew):
+        super()._log_episode(
+            outcome,
+            avg_g,
+            terminal_rew + self._terminal_reward_adjustment(outcome),
+        )
+
+    def _write_audit_terminal(self, avg_g, dist, terminal_rew, outcome):
+        super()._write_audit_terminal(
+            avg_g,
+            dist,
+            terminal_rew + self._terminal_reward_adjustment(outcome),
+            outcome,
+        )
 
     def _log_episode_end(self):
         outcome = self._outcome()

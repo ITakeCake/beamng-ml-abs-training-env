@@ -26,9 +26,11 @@ STATE_VERSION = 1
 # Written to the run fields (not per-algorithm). Anything not listed is not
 # remembered, so adding a widget does not silently start persisting it.
 RUN_KEYS = (
-    "algo", "net_arch", "speeds", "pedal_random", "pedal_spec",
+    "backend", "algo", "net_arch", "cosim_net_arch", "residual_net_arch",
+    "cosim_reward", "residual_reward", "cosim_run_name", "residual_run_name",
+    "speeds", "pedal_random", "pedal_spec",
     "grip", "corner", "reward", "run_name", "total_steps",
-    "car_model", "car_trim", "car_custom",
+    "car_model", "car_trim", "car_custom", "runup_speed_factor", "seed",
 )
 
 

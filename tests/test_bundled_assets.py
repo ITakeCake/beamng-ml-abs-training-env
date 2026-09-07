@@ -33,6 +33,7 @@ def test_the_bundled_copy_has_the_features_the_env_calls():
     shipping a telemetry file missing the calls the env makes."""
     src = _normalized(BUNDLED_LUA)
     for fn in ("armBrakeSlam", "armGripChange", "restoreGrip", "setGripMultiplier",
+               "armRunupHandoff", "disarmRunupHandoff",
                "setTargetSpeed", "resetAccum", "releaseBrakes",
                "lastBrakeAvgGArc", "tel_yaw_rate_inst"):
         assert fn in src, f"bundled abstelemetry.lua is missing {fn}"

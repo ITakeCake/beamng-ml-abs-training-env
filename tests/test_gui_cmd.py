@@ -1,6 +1,7 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from gui_cmd import build_cmd, validate_settings
+from gui_cmd import (build_cmd, build_cosim_cmd, build_cosim_config,
+                     validate_settings)
 
 BASE = dict(algo="sac", speeds="60,120", pedal_random=True, pedal_spec="0.4-1.0",
             total_steps=200000, run_name="r1", resume="",
@@ -15,10 +16,75 @@ def test_sac_cmd_has_sac_flags_not_ppo():
     assert "--n-steps" not in s and "--clip-range" not in s
 
 def test_ppo_cmd_has_ppo_flags_not_sac():
-    cmd = build_cmd({**BASE, "algo": "ppo"})
+    cmd = build_cmd({**BASE, "algo": "ppo", "initial_release": 0.1,
+                     "log_std_init": -0.7})
     s = " ".join(cmd)
     assert "--algo ppo" in s and "--n-steps 2048" in s
     assert "--buffer-size" not in s and "--target-entropy" not in s
+    assert "--initial-release 0.1" in s and "--log-std-init -0.7" in s
+
+
+def test_run_specific_graceful_stop_path_is_passed():
+    cmd = build_cmd({**BASE, "stop_file": r"runs\r1\STOP_TRAINING.txt"})
+    assert cmd[cmd.index("--stop-file") + 1].endswith("STOP_TRAINING.txt")
+
+
+def test_ppo_validation_accepts_new_defaults_and_rejects_endpoints():
+    good = {**BASE, "algo": "ppo", "ent_coef": 0,
+            "initial_release": 0.1, "log_std_init": -0.7}
+    assert validate_settings(good) == []
+    assert any("initial release" in p for p in
+               validate_settings({**good, "initial_release": 1.0}))
+
+
+def test_cosim_gui_config_contains_bounded_ppo_and_runup_controls(tmp_path):
+    settings = {**BASE, "backend": "cosim", "algo": "ppo", "reward": "v6.0",
+                "pedal_random": False, "net_arch": "3x256",
+                "initial_release": "0.1", "log_std_init": "-0.7",
+                "runup_speed_factor": "16", "headless": True, "port": 64280,
+                "gamma": "0.995", "seed": "12345"}
+    assert validate_settings(settings) == []
+    cfg = build_cosim_config(settings)
+    assert cfg["runup_speed_factor"] == 16.0
+    assert cfg["ppo"]["initial_release"] == 0.1
+    assert cfg["ppo"]["log_std_init"] == -0.7
+    assert cfg["ppo"]["gamma"] == 0.995
+    assert cfg["seed"] == "12345"
+    assert cfg["ppo"]["net_arch"] == [256, 256, 256]
+    cmd = build_cosim_cmd(tmp_path / "config.json")
+    assert cmd[1:3] == ["train_cosim.py", "--config"]
+
+
+def test_cosim_validation_rejects_unsupported_options_before_launch():
+    base = {**BASE, "backend": "cosim", "algo": "ppo",
+            "initial_release": 0.1, "log_std_init": -0.7,
+            "runup_speed_factor": 4, "pedal_random": False}
+    assert any("normalized" in p for p in
+               validate_settings({**base, "reward": "normalized"}))
+    assert any("run-up" in p for p in
+               validate_settings({**base, "reward": "v6.0",
+                                  "runup_speed_factor": 0}))
+    assert any("seed" in p for p in validate_settings(
+        {**base, "reward": "v6.0", "seed": "not-an-int"}))
+
+
+def test_cosim_resume_passes_checkpoint_and_requires_paired_vecnormalize(tmp_path):
+    checkpoint = tmp_path / "PPO-1_50000_steps.zip"
+    checkpoint.write_bytes(b"placeholder")
+    base = {**BASE, "backend": "cosim", "algo": "ppo", "reward": "v6.0",
+            "initial_release": 0.1, "log_std_init": -0.7,
+            "runup_speed_factor": 4, "pedal_random": False,
+            "resume": str(checkpoint)}
+    assert any("VecNormalize" in problem for problem in validate_settings(base))
+    (tmp_path / "PPO-1_50000_steps_vecnormalize.pkl").write_bytes(b"placeholder")
+    assert validate_settings(base) == []
+    assert build_cosim_config(base)["resume_checkpoint"] == str(checkpoint.resolve())
+    assert build_cosim_config(base)["resume_inherit_config"] is True
+
+
+def test_run_name_cannot_escape_the_runs_directory():
+    assert any("run name" in p for p in
+               validate_settings({**BASE, "run_name": "../outside"}))
 
 def test_pedal_off_when_switch_disabled():
     s = " ".join(build_cmd({**BASE, "pedal_random": False}))

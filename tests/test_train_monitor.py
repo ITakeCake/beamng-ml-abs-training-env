@@ -183,6 +183,16 @@ def test_file_source_accepts_a_csv_path_directly(tmp_path):
     assert tm.file_source(str(p))().episodes == 1
 
 
+def test_cosim_filename_and_wall_s_feed_rate_and_eta(tmp_path):
+    import train_monitor as tm
+    p = tmp_path / "episode_log.csv"
+    p.write_text("episode,avg_g,steps,wall_s,outcome\n1,1.0,100,5,STOP\n")
+    stats = tm.file_source(str(tmp_path), total_steps=1000, run_name="C",
+                           episode_filename="episode_log.csv")()
+    assert stats.episodes == 1
+    assert stats.steps_per_sec == pytest.approx(20.0)
+
+
 def test_replay_reveals_episodes_gradually(tmp_path):
     """The demo has to animate, or it shows a finished chart and proves nothing
     about how the window behaves during a run."""

@@ -101,3 +101,43 @@ def test_remove_model_from_game(tmp_path, monkeypatch):
 
     mo.remove_model_from_game(run, mod_dir)
     assert len(json.loads(open(models_path).read())) == 0
+
+
+def test_cosim_export_selects_bounded_head_and_two_axle_controller(tmp_path,
+                                                                  monkeypatch):
+    calls = []
+    def fake_run_exporter(cmd):
+        with open(cmd[cmd.index("--out") + 1], "w") as fh:
+            fh.write("-- fake weights\n")
+        calls.append(cmd)
+        return True, "PASS"
+    monkeypatch.setattr(mo, "_run_exporter", fake_run_exporter)
+    run_dir = tmp_path / "runs" / "cosim"
+    run_dir.mkdir(parents=True)
+    (run_dir / "final.zip").write_bytes(b"x")
+    (run_dir / "vecnormalize.pkl").write_bytes(b"x")
+    run = RunInfo("cosim", str(run_dir), "ppo", "vehicles/etk800/x.pc",
+                  "etk800", 1.1, "cosim_axle_release_v1")
+    mod_dir = str(tmp_path / "mod")
+    ok, _ = mo.export_model_to_game(run, mod_dir)
+    assert ok
+    cmd = calls[0]
+    assert cmd[cmd.index("--head") + 1] == "ppo_tanh_release01"
+    assert cmd[cmd.index("--interface") + 1] == "cosim_axle_release_v1"
+    data = json.loads(open(os.path.join(
+        mod_dir, "vehicles", "etk800", "ml_abs_models.jbeam")).read())
+    controller = next(iter(data.values()))["controller"][1][0]
+    assert controller == "MTB-ML-ABS-CoSim"
+    assert os.path.isfile(os.path.join(
+        mod_dir, "lua", "vehicle", "controller", "MTB-ML-ABS-CoSim.lua"))
+
+
+def test_incompatible_residual_export_fails_before_subprocess(tmp_path,
+                                                              monkeypatch):
+    monkeypatch.setattr(mo, "_run_exporter",
+                        lambda cmd: (_ for _ in ()).throw(AssertionError(cmd)))
+    run = RunInfo("res", str(tmp_path), "ppo", "vehicles/etk800/x.pc",
+                  "etk800", 1.0, "residual_axle_release_v1")
+    ok, message = mo.export_model_to_game(run, str(tmp_path / "mod"))
+    assert not ok
+    assert "two" in message and "invalid" in message

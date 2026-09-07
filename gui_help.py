@@ -13,6 +13,19 @@ rather than buried in widget construction.
 
 # --- what the car is asked to do -------------------------------------------
 RUN_HELP = {
+    "backend": (
+        "Which simulator/control interface performs training.\n\n"
+        "Co-sim is the current PPO path: a 35-value frame stacked 64 deep and bounded axle-"
+        "release actions at 100 Hz. Residual is the older in-car path retained "
+        "for comparisons and SAC experiments. Their checkpoints are not action-"
+        "compatible, so the Output tab identifies the deployment contract."
+    ),
+    "runup_speed_factor": (
+        "Co-sim acceleration speed before the braking handoff.\n\n"
+        "4 runs the approach at 4x physics speed. Vehicle Lua detects the handoff, "
+        "then the engine acknowledges return to real time before coupling and "
+        "brake activation. This changes run-up wall time, not the 100 Hz stop."
+    ),
     "speeds": (
         "How fast the car is going when the brakes slam on, in mph.\n\n"
         "One number (60) trains at that speed every time. A list (60,90,120)\n"
@@ -75,6 +88,34 @@ RUN_HELP = {
     ),
     "reward": (
         "How the controller is scored -- what it is trying to get better at.\n\n"
+        "v9.0       = the dense term IS the metric: -1 point per metre\n"
+        "             travelled, every step, so the episode sum is exactly\n"
+        "             minus the stopping distance. Nothing is measured with\n"
+        "             the noisy accelerometer, and duration cannot be farmed.\n"
+        "             Terminal ramp through measured lockup g (0.979 on the\n"
+        "             trainer car at 80 mph) with a quadratic kicker above\n"
+        "             1.10 g. Magnitudes are O(100), not O(2000).\n"
+        "v3.3       = FastTrain reward v3.3 itself, the 1.16 g in-env model:\n"
+        "             affine G shape (-140 at 0.4 g, 0 at 0.5 g, +2100 at 2 g)\n"
+        "             at the stop and per step, log bonus above 1.06 g, per-step\n"
+        "             heading penalty. Big numbers, no slip term. Baseline only.\n"
+        "v8.0       = v7 slip cost PLUS +3/s per g of clean window-averaged\n"
+        "             braking G (below the 5/s time cost, so still never\n"
+        "             positive per step). Yaw guard deadzone 0.30 rad. Use\n"
+        "             this when v7 sits flat: it says brake harder NOW.\n"
+        "v7.0       = v6's terminal G and stability guard, but the per-step\n"
+        "             signal is a COST on TRUE wheel slip: -5/s per wheel at or\n"
+        "             below 0.50 (plain time cost), -10/s between 0.50 and 0.99,\n"
+        "             -30/s locked. Never positive per step, so the shortest\n"
+        "             non-locking stop is the cheapest. No dense G.\n"
+        "v6.1       = exactly v6.0 scoring, but four independent wheel\n"
+        "             releases instead of the front/rear axle lock.\n"
+        "v6.0       = G-primary. Rewards a short rolling average of positive\n"
+        "             braking G and subtracts a modest penalty for variation.\n"
+        "             There is no chosen target and no upper plateau; higher\n"
+        "             sustained G always scores higher. A terminal-only, capped\n"
+        "             stability guard costs up to 3 points for a curved stop.\n"
+        "             This is the default.\n\n"
         "v5.0       = fixed targets. A stop is scored against absolute\n"
         "             numbers that were hand-picked for dry tarmac at 60 mph.\n"
         "             On a wet road a genuinely good stop scores badly.\n\n"
@@ -82,7 +123,7 @@ RUN_HELP = {
         "             better than locking the wheels', 1 means 'as good as the\n"
         "             car's own factory ABS', above 1 means better than\n"
         "             factory. Comparable across any surface or speed.\n\n"
-        "Use normalized. It needs baselines measured first."
+        "Use v6.0 for new training. Normalized needs baselines measured first."
     ),
     "run_name": (
         "A folder name for this attempt, under runs\\.\n\n"
@@ -276,12 +317,47 @@ PPO_HELP = {
         "credit. Higher (0.95) shares credit further back.\n\n"
         "Too high gets noisy, too low ignores early decisions that mattered."
     ),
+    "gamma": (
+        "How strongly PPO discounts rewards that arrive later in the same stop.\n\n"
+        "At the co-sim rate of 100 steps per second, 0.99 makes a terminal score\n"
+        "five seconds away worth only about 0.7% to the earliest decision. A\n"
+        "larger value carries terminal braking quality farther back through the\n"
+        "episode, but can make value estimates noisier. Keep 0.99 for the first\n"
+        "replication run; change it only as one declared experiment."
+    ),
     "ent_coef": (
         "How strongly to encourage experimenting rather than repeating what\n"
         "already works.\n\n"
         "Same idea as SAC's target entropy. Too low and it locks onto the\n"
         "brake-slamming habit early; too high and it never commits to\n"
-        "anything. 0.005 is a mild nudge."
+        "anything. With the new bounded PPO policy, 0 is the safe baseline: its\n"
+        "initial spread already supplies exploration, without paying PPO to\n"
+        "keep a permanently broad distribution."
+    ),
+    "target_kl": (
+        "A tripwire on how far one update may move the policy.\n\n"
+        "PPO measures how different the new policy is from the one that\n"
+        "collected the data (approximate KL). Normal updates sit near 0.01.\n"
+        "When an update exceeds this value, the remaining optimisation epochs\n"
+        "for that batch are skipped instead of dragging the policy further.\n"
+        "PPO-52 went 0.03 -> 75 -> 10^8 in a dozen rollouts and ended in NaN\n"
+        "weights; with 0.02 the runaway stops at the first bad step. 0 turns\n"
+        "the check off. Only raise it if healthy runs keep tripping it."
+    ),
+    "initial_release": (
+        "Where a fresh PPO controller starts before it has learned anything.\n\n"
+        "0 means no release (full braking) and 1 means full release. 0.50 is\n"
+        "the unbiased centre: a fresh policy samples the whole range, so it\n"
+        "sees locked and unlocked wheels from episode 1. Below ~0.5 release\n"
+        "the front wheel stays locked, so a low start can never explore out\n"
+        "of lock. Fresh PPO runs only; a resumed checkpoint keeps its policy."
+    ),
+    "log_std_init": (
+        "The starting spread of PPO's hidden Gaussian before it is transformed\n"
+        "into a legal 0-to-1 brake-release command.\n\n"
+        "0.0 (the SB3 default) spreads first actions over roughly 0.12 to\n"
+        "0.88. -0.70 was the old value and was too narrow to ever sample a\n"
+        "wheel unlock. More negative is less random."
     ),
 }
 

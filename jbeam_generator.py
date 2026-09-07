@@ -131,9 +131,9 @@ def generate_parent_jbeam(model, slot_types):
     return json.dumps(data, indent=2)
 
 
-def generate_model_jbeam(model, run_name, weights_module):
-    """One child part for MODEL_SLOT_TYPE: the SAME MTB-ML-ABS controller,
-    pointed at this run's exported weights module via jbeamData.weights."""
+def generate_model_jbeam(model, run_name, weights_module,
+                         controller="MTB-ML-ABS"):
+    """One child part pointing its compatible controller at exported weights."""
     part_name = f"mlabs_model_{run_name}"
     data = {
         part_name: {
@@ -145,7 +145,7 @@ def generate_model_jbeam(model, run_name, weights_module):
             "slotType": MODEL_SLOT_TYPE,
             "controller": [
                 ["fileName"],
-                ["MTB-ML-ABS", {"weights": weights_module}],
+                [controller, {"weights": weights_module}],
             ],
         },
     }

@@ -33,10 +33,12 @@ PYTHON = _console_python()
 # Beyond this a calibration run stops being something a person starts
 # and waits for. Time, not level count: fast mode changes the arithmetic.
 MAX_CALIBRATION_SECONDS = 4 * 3600
+REFERENCE_VEHICLE_PC = "vehicles/etk800/Machine-Trainer-Boy-V2-MLABS.pc"
 
 # per-algo flags: dict key -> CLI flag (underscores become dashes)
 SAC_KEYS = ["lr", "buffer_size", "tau", "target_entropy", "learning_starts", "train_freq"]
-PPO_KEYS = ["lr", "n_steps", "batch_size", "n_epochs", "clip_range", "gae_lambda", "ent_coef"]
+PPO_KEYS = ["lr", "n_steps", "batch_size", "n_epochs", "clip_range", "gae_lambda",
+            "gamma", "ent_coef", "initial_release", "log_std_init", "target_kl"]
 
 
 def build_cmd(settings):
@@ -49,10 +51,15 @@ def build_cmd(settings):
            "--run-name", str(settings["run_name"])]
 
     for key in (SAC_KEYS if algo == "sac" else PPO_KEYS):
-        cmd += ["--" + key.replace("_", "-"), str(settings[key])]
+        # Old saved GUI state predates newer algorithm knobs. Omitting an absent
+        # key deliberately selects the trainer's own versioned default.
+        if key in settings and str(settings[key]).strip() != "":
+            cmd += ["--" + key.replace("_", "-"), str(settings[key])]
 
     if settings.get("resume"):
         cmd += ["--resume", settings["resume"]]
+    if settings.get("stop_file"):
+        cmd += ["--stop-file", settings["stop_file"]]
 
     if settings.get("vehicle_pc"):
         cmd += ["--vehicle-pc", settings["vehicle_pc"]]
@@ -75,6 +82,42 @@ def build_cmd(settings):
                 "--train-speed-factor", str(settings.get("train_speed_factor", 1))]
 
     return cmd
+
+
+def build_cosim_cmd(config_path):
+    """Argv for the JSON-configured co-sim PPO backend."""
+    return [PYTHON, "train_cosim.py", "--config", os.path.abspath(config_path)]
+
+
+def build_cosim_config(settings):
+    """Translate validated GUI values to train_cosim.py's stable JSON contract."""
+    ppo = {}
+    integer_keys = {"n_steps", "batch_size", "n_epochs"}
+    for key in PPO_KEYS:
+        if key not in settings or str(settings[key]).strip() == "":
+            continue
+        ppo[key] = (int(settings[key]) if key in integer_keys
+                    else float(settings[key]))
+    ppo["net_arch"] = parse_net_arch(settings.get("net_arch") or "3x256")
+    config = {
+        "run_name": str(settings["run_name"]),
+        "seed": settings.get("seed") or "auto",
+        "total_steps": int(settings["total_steps"]),
+        "speeds": parse_speeds(str(settings["speeds"])),
+        "runup_speed_factor": float(settings.get("runup_speed_factor", 4.0)),
+        "vehicle_pc": settings.get("vehicle_pc") or REFERENCE_VEHICLE_PC,
+        "reward": settings.get("reward") or "v6.0",
+        "device": settings.get("device") or None,
+        "headless": bool(settings.get("headless", True)),
+        "port": int(settings.get("port", 64280)),
+        "stop_file": "STOP_TRAINING.txt",
+        "diagnostics": {"enabled": True},
+        "ppo": ppo,
+    }
+    if settings.get("resume"):
+        config["resume_checkpoint"] = os.path.abspath(settings["resume"])
+        config["resume_inherit_config"] = True
+    return config
 
 
 def build_calibration_cmd(settings, car, reps=3):
@@ -161,7 +204,37 @@ def validate_calibration_settings(settings):
 
 def validate_settings(settings):
     problems = []
-    if not settings.get("deterministic", True):
+    backend = settings.get("backend", "residual")
+    if backend == "cosim":
+        if settings.get("algo") != "ppo":
+            problems.append("co-sim training supports PPO only")
+        if settings.get("resume"):
+            checkpoint = os.path.abspath(os.fspath(settings["resume"]))
+            if not os.path.isfile(checkpoint):
+                problems.append("resume checkpoint does not exist")
+            elif not checkpoint.lower().endswith(".zip"):
+                problems.append("resume checkpoint must be an SB3 .zip file")
+            else:
+                from experiment_io import paired_vecnormalize_path
+                try:
+                    vec_path = paired_vecnormalize_path(checkpoint)
+                except ValueError as exc:
+                    problems.append(str(exc))
+                else:
+                    if not os.path.isfile(vec_path):
+                        problems.append(
+                            "resume checkpoint is missing its paired VecNormalize file")
+        if settings.get("reward") == "normalized":
+            problems.append("co-sim supports reward v6.0 or v5.0, not normalized")
+        raw = str(settings.get("runup_speed_factor", "4")).strip()
+        try:
+            factor = float(raw)
+        except ValueError:
+            problems.append(f"run-up speed must be a number, got {raw!r}")
+        else:
+            if not __import__("math").isfinite(factor) or not 1.0 <= factor <= 1000.0:
+                problems.append("co-sim run-up speed must be from 1x to 1000x")
+    elif not settings.get("deterministic", True):
         raw = str(settings.get("train_speed_factor", "1")).strip()
         try:
             factor = float(raw)
@@ -179,17 +252,17 @@ def validate_settings(settings):
         parse_speeds(settings["speeds"])
     except ValueError as e:
         problems.append(str(e))
-    if settings["pedal_random"]:
+    if backend != "cosim" and settings["pedal_random"]:
         try:
             parse_pedal_spec(settings["pedal_spec"])
         except ValueError as e:
             problems.append(str(e))
-    if settings.get("grip"):
+    if backend != "cosim" and settings.get("grip"):
         try:
             parse_grip_spec(settings["grip"])
         except ValueError as e:
             problems.append(str(e))
-    if settings.get("corner"):
+    if backend != "cosim" and settings.get("corner"):
         try:
             parse_corner_spec(settings["corner"])
         except ValueError as e:
@@ -199,4 +272,63 @@ def validate_settings(settings):
             parse_net_arch(settings["net_arch"])
         except ValueError as e:
             problems.append(str(e))
+    run_name = str(settings.get("run_name", "")).strip()
+    if (not run_name or run_name in (".", "..")
+            or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+                   for c in run_name)):
+        problems.append(
+            "run name must contain only letters, numbers, dot, underscore, or dash")
+    # Validate the fields that would otherwise fail only after BeamNG boots.
+    # (minimum, maximum, minimum-is-strict, maximum-is-strict)
+    numeric = {
+        "lr": (0.0, None, True, False),
+        "total_steps": (1.0, None, False, False),
+    }
+    if settings.get("algo") == "ppo":
+        numeric.update({
+            "n_steps": (2.0, None, False, False),
+            "batch_size": (1.0, None, False, False),
+            "n_epochs": (1.0, None, False, False),
+            "clip_range": (0.0, 1.0, True, False),
+            "gae_lambda": (0.0, 1.0, True, False),
+            "gamma": (0.0, 1.0, True, False),
+            "ent_coef": (0.0, None, False, False),
+            "initial_release": (0.0, 1.0, True, True),
+            "log_std_init": (None, None, False, False),
+        })
+        if backend == "cosim":
+            raw_seed = str(settings.get("seed", "auto")).strip().lower()
+            if raw_seed not in ("", "auto", "random"):
+                try:
+                    seed = int(raw_seed)
+                except ValueError:
+                    problems.append("seed must be an integer or auto")
+                else:
+                    if not 0 <= seed < 2 ** 32:
+                        problems.append("seed must be from 0 to 4294967295")
+    for key, (low, high, low_open, high_open) in numeric.items():
+        if key not in settings or str(settings.get(key, "")).strip() == "":
+            continue
+        raw = str(settings.get(key, "")).strip()
+        try:
+            value = float(raw)
+        except ValueError:
+            problems.append(f"{key.replace('_', ' ')} must be a number, got {raw!r}")
+            continue
+        if not __import__("math").isfinite(value):
+            problems.append(f"{key.replace('_', ' ')} must be finite")
+        elif low is not None and (value < low or (low_open and value == low)):
+            word = "greater than" if low_open else "at least"
+            problems.append(f"{key.replace('_', ' ')} must be {word} {low:g}")
+        elif high is not None and (value > high or (high_open and value == high)):
+            word = "less than" if high_open else "at most"
+            problems.append(f"{key.replace('_', ' ')} must be {word} {high:g}")
+    if settings.get("algo") == "ppo":
+        try:
+            n_steps = int(settings.get("n_steps", ""))
+            batch_size = int(settings.get("batch_size", ""))
+            if batch_size > n_steps:
+                problems.append("PPO batch size cannot exceed n steps")
+        except ValueError:
+            pass
     return problems

@@ -14,3 +14,17 @@ STOP_TRAINING.txt
 
 # GUI field memory -- machine-local, like settings.json
 gui_state.json
+
+# experiment outputs: rollout datasets, result tables, probe captures
+*.npz
+*.csv
+!calibration/*.csv
+!tests/fixtures/*.csv
+evaluations/
+experiments/
+best_models/
+.gui-configs/
+
+# parked copies live outside the repo, never commit one
+*.BAK*
+*_BAK

@@ -8,9 +8,23 @@ import os
 import sys
 
 import gymnasium as gym
+import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from train_residual import build_model, resolve_device
+from bounded_ppo import UnitIntervalActorCriticPolicy
+
+
+class _PPOEnv(gym.Env):
+    observation_space = gym.spaces.Box(-1, 1, (3,), dtype=np.float32)
+    action_space = gym.spaces.Box(0, 1, (2,), dtype=np.float32)
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        return np.zeros(3, np.float32), {}
+
+    def step(self, action):
+        return np.zeros(3, np.float32), 0.0, False, False, {}
 
 
 def _sac_ns(**over):
@@ -25,7 +39,7 @@ def _sac_ns(**over):
 def _ppo_ns(**over):
     base = dict(algo="ppo", lr=1e-4, n_steps=64, batch_size=32, n_epochs=2,
                 clip_range=0.2, gae_lambda=0.95, ent_coef=0.005, device=None,
-                net_arch="3x256")
+                initial_release=0.1, log_std_init=-0.7, net_arch="3x256")
     base.update(over)
     return argparse.Namespace(**base)
 
@@ -49,17 +63,18 @@ def test_sac_gets_3x256_relu_and_train_freq_2():
 
 
 def test_ppo_gets_3x256_relu_and_ent_coef():
-    env = gym.make("Pendulum-v1")
+    env = _PPOEnv()
     model = build_model(_ppo_ns(device="cpu"), env)
     assert model.policy.net_arch == {"pi": [256, 256, 256], "vf": [256, 256, 256]}
     assert model.policy.activation_fn.__name__ == "ReLU"
     assert model.ent_coef == 0.005
+    assert isinstance(model.policy, UnitIntervalActorCriticPolicy)
 
 
 def test_a_custom_network_shape_reaches_the_model():
     """The setting is new; without this the box could be ignored and nobody
     would notice, since a wrong-but-valid network still trains."""
-    env = gym.make("Pendulum-v1")
+    env = _PPOEnv()
     model = build_model(_ppo_ns(device="cpu", net_arch="4x64"), env)
     assert model.policy.net_arch == {"pi": [64] * 4, "vf": [64] * 4}
 
@@ -67,6 +82,6 @@ def test_a_custom_network_shape_reaches_the_model():
 def test_sac_uses_qf_and_ppo_uses_vf_for_the_value_network():
     """SB3 names the value half differently per algorithm; getting it wrong
     silently falls back to SB3's own default instead of raising."""
-    env = gym.make("Pendulum-v1")
-    assert "qf" in build_model(_sac_ns(device="cpu", net_arch="2x32"), env).policy.net_arch
-    assert "vf" in build_model(_ppo_ns(device="cpu", net_arch="2x32"), env).policy.net_arch
+    sac_env = gym.make("Pendulum-v1")
+    assert "qf" in build_model(_sac_ns(device="cpu", net_arch="2x32"), sac_env).policy.net_arch
+    assert "vf" in build_model(_ppo_ns(device="cpu", net_arch="2x32"), _PPOEnv()).policy.net_arch

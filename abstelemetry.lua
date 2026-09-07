@@ -819,6 +819,45 @@ local function disarmBrakeSlam()
 end
 
 -- =====================================================
+-- (COSIM) 2 kHz accelerated-run-up handoff.
+-- Python polling is intentionally not responsible for the cutoff: at a 4x+
+-- physics factor, one graphics/poll interval can cover a large speed change.
+-- This latch catches the rising-speed crossing on the physics tick and holds
+-- throttle at zero until Python has acknowledged restoring real time.
+-- =====================================================
+local runupHandoff = {target = nil, fired = false}
+
+local function armRunupHandoff(target_ms)
+  runupHandoff.target = target_ms
+  runupHandoff.fired = false
+  electrics.values.tel_runup_handoff_armed = 1
+  electrics.values.tel_runup_handoff_fired = 0
+  electrics.values.tel_runup_handoff_fire_speed = -1
+end
+
+local function disarmRunupHandoff()
+  runupHandoff.target = nil
+  runupHandoff.fired = false
+  electrics.values.tel_runup_handoff_armed = 0
+  electrics.values.tel_runup_handoff_fired = 0
+end
+
+local function updateRunupHandoff()
+  if runupHandoff.target == nil then return end
+  if not runupHandoff.fired and instSpeed >= runupHandoff.target then
+    runupHandoff.fired = true
+    electrics.values.tel_runup_handoff_fired = 1
+    electrics.values.tel_runup_handoff_fire_speed = instSpeed
+    print(string.format(
+      "=== TELEMETRY: run-up handoff FIRED at %.4f m/s (target %.4f m/s) ===",
+      instSpeed, runupHandoff.target))
+  end
+  if runupHandoff.fired then
+    input.throttle = 0
+  end
+end
+
+-- =====================================================
 -- TIRE GRIP CONTROL
 -- Changes the TIRE's friction, not the ground surface: the same mechanism
 -- BeamNG's own tire-damage code uses (beamstate.lua:549-557) --
@@ -934,6 +973,76 @@ local function updateArmedSlam()
 end
 
 
+-- =====================================================
+-- 100 Hz policy-window stats, published EVERY physics tick as electrics so the
+-- co-sim "To" packet and the in-car controller read identical, past-only
+-- values: the last WIN_N ticks ending at the current one. Mirrors the
+-- MachineTrainerBoy readAll() window (gy_avg from speed delta, min/max of the
+-- SM_N-tick smoothed decel, mean yaw rate).
+-- =====================================================
+local WIN_N = 20        -- 20 ticks at 2000 Hz = one 100 Hz policy period
+local SM_N = 6          -- same smoothing length as the poll min/max
+local winSpeed, winGy, winYaw = {}, {}, {}
+local winIdx, winCount = 0, 0
+local smBuf, smIdx, smCount, smSum = {}, 0, 0, 0
+
+-- No reset hook: the window self-flushes within WIN_N ticks, and onReset is
+-- already at LuaJIT's 60-upvalue cap.
+local function updateWindowStats(speed, decel, yawRate, dtPhys)
+  smIdx = (smIdx % SM_N) + 1
+  smSum = smSum - (smBuf[smIdx] or 0) + decel
+  smBuf[smIdx] = decel
+  if smCount < SM_N then smCount = smCount + 1 end
+  local smoothed = smSum / smCount
+
+  winIdx = (winIdx % WIN_N) + 1
+  winSpeed[winIdx] = speed
+  winGy[winIdx] = smoothed
+  winYaw[winIdx] = yawRate
+  if winCount < WIN_N then winCount = winCount + 1 end
+
+  local gyAvg = 0
+  if winCount >= 2 then
+    local oldIdx = (winCount == WIN_N) and ((winIdx % WIN_N) + 1) or 1
+    gyAvg = (winSpeed[oldIdx] - speed) / ((winCount - 1) * dtPhys)
+  end
+  local mn, mx, ys = math.huge, -math.huge, 0
+  for k = 1, winCount do
+    local g = winGy[k]
+    if g < mn then mn = g end
+    if g > mx then mx = g end
+    ys = ys + winYaw[k]
+  end
+  local ev = electrics.values
+  ev.tel_win_gy_avg = gyAvg
+  ev.tel_win_gy_min = mn
+  ev.tel_win_gy_max = mx
+  ev.tel_win_yaw_avg = ys / winCount
+  ev.tel_gz_inst = instGz
+  ev.tel_rpm = ev.rpm or 0
+  ev.tel_gear = ev.gearIndex or ev.gear or 0
+  ev.tel_steer = ev.steering_input or 0
+  ev.tel_throttle_in = (input and input.throttle) or 0
+  ev.tel_brake_in = (input and input.brake) or 0
+  ev.tel_abs_speed = ev.virtualAirspeed or 0   -- stock non-arcade ABS reference speed
+  -- Applied brake torque = wheels.lua brakingTorque (after the pressure delay):
+  -- what a per-channel hydraulic pressure sensor reads, not the physics-side
+  -- brakeTorqueApplied. wheelData order 3=FR, 4=FL, 1=RR, 2=RL.
+  if initialized and #wheelData >= 4 then
+    ev.tel_brk_applied_fr = wheelData[3].ref.brakingTorque or 0
+    ev.tel_brk_applied_fl = wheelData[4].ref.brakingTorque or 0
+    ev.tel_brk_applied_rr = wheelData[1].ref.brakingTorque or 0
+    ev.tel_brk_applied_rl = wheelData[2].ref.brakingTorque or 0
+  end
+  local d = obj:getDirectionVector()
+  local u = obj:getDirectionVectorUp()
+  if d and u then
+    local horiz = math.sqrt(d.x * d.x + d.y * d.y)
+    ev.tel_att_pitch = math.atan2(d.z, horiz)
+    ev.tel_att_roll = math.atan2(d.x * u.y - d.y * u.x, u.z)
+  end
+end
+
 local function onPhysicsStep(dtPhys)
   if not initialized then return end
   if dtPhys <= 0 then return end
@@ -974,6 +1083,7 @@ local function onPhysicsStep(dtPhys)
 
   -- Poll + per-frame accumulators (extracted to helper for upvalue budget)
   updatePollAccumulators(substepDecel, sensorX, sensorZ, yawRate, dtPhys, physPrevSpeed)
+  updateWindowStats(speed, substepDecel, yawRate, dtPhys)
 
   -- =====================================================
   -- FUSED SPEED ESTIMATOR at 2000Hz — integrator-floor model
@@ -981,6 +1091,10 @@ local function onPhysicsStep(dtPhys)
   -- (extracted to helper for upvalue budget)
   -- =====================================================
   updateFusedSpeed(dtPhys)
+
+  -- Stop accelerated throttle on the exact rising-speed physics tick. Python
+  -- restores real time, disarms this latch, and completes the final speed band.
+  updateRunupHandoff()
 
   -- (PPO_V2) armed 2kHz slam — MUST run before the brake SM reads input.brake so
   -- the SM arms on the very tick the pedal latches at the target crossing.
@@ -1275,6 +1389,14 @@ local function onExtensionLoaded()
   print("=== TELEMETRY BRIDGE v3.3 LOADED (physics-rate inst_speed for speed_factor support) ===")
   electrics.values.tel_status = "LOADING_v3.2"
   electrics.values.tel_heartbeat = 0
+  for _, key in ipairs({"tel_win_gy_avg", "tel_win_gy_min", "tel_win_gy_max",
+                        "tel_win_yaw_avg", "tel_gz_inst", "tel_rpm", "tel_gear",
+                        "tel_steer", "tel_throttle_in", "tel_brake_in", "tel_abs_speed",
+                        "tel_brk_applied_fr", "tel_brk_applied_fl",
+                        "tel_brk_applied_rr", "tel_brk_applied_rl",
+                        "tel_att_pitch", "tel_att_roll"}) do
+    electrics.values[key] = 0
+  end
   enablePhysicsStepHook()
   print("=== TELEMETRY: Physics step hook enabled ===")
 end
@@ -1307,6 +1429,12 @@ local function onReset()
   brakeStartPosition = nil; brakeStartTime = 0
   lastBrakeAvgGy = 0; lastBrakeAvgG = 0; lastBrakeAvgGArc = 0; lastBrakeDist = 0; lastBrakeDistArc = 0; brakeArcDist = 0; brakePrevPos = nil
   lastBrakeStartSpeed = 0; lastBrakeDuration = 0
+
+  runupHandoff.target = nil
+  runupHandoff.fired = false
+  electrics.values.tel_runup_handoff_armed = 0
+  electrics.values.tel_runup_handoff_fired = 0
+  electrics.values.tel_runup_handoff_fire_speed = -1
 
   -- Reset PD state but preserve enabled/config
   pdCarSpeed = 0
@@ -1345,6 +1473,8 @@ M.armGripChange     = armGripChange       -- tire grip: at brake onset
 M.restoreGrip       = restoreGrip         -- tire grip: back to stock
 M.armBrakeSlam = armBrakeSlam       -- (PPO_V2) 2kHz-exact brake onset
 M.disarmBrakeSlam = disarmBrakeSlam
+M.armRunupHandoff = armRunupHandoff
+M.disarmRunupHandoff = disarmRunupHandoff
 M.resetAccum = resetAccum
 M.nukeControllers = nukeControllers
 M.exchangeData = exchangeData

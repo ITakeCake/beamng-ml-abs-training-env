@@ -24,7 +24,11 @@ for what's done and what's left.
 - `abs_env_residual.py` -- the residual (release-from-pedal) env
 - `residual_core.py` -- pure action-space math + CLI arg parsing (no game imports)
 - `residual_log.py` -- shared logging (GUI / trainer / probe each get their own log file)
-- `train_residual.py` -- SAC/PPO trainer (stable-baselines3)
+- `train_cosim.py` -- current 100 Hz co-sim PPO trainer
+- `train_residual.py` -- legacy in-car SAC/PPO trainer
+- `bounded_ppo.py` -- bounded PPO action distribution and checkpoint contract
+- `experiment_io.py` -- atomic checkpoint pairs, validation, run state, provenance
+- `evaluate_cosim.py` -- frozen checkpoint evaluation and best-pair preservation
 - `gui_train.py`, `gui_cmd.py` -- tkinter launcher/monitor GUI
 - `baseline_probe.py` -- sanity gates run before trusting a training config
 - `abstelemetry.lua` -- in-game telemetry/actuation bridge
@@ -48,4 +52,11 @@ python train_residual.py --algo sac --speeds "60" --pedal off \
     --total-steps 10000 --run-name smoke_sac
 ```
 
-Or launch `gui_train.py` for the same flow with a live monitor.
+Or launch `gui_train.py`, select `cosim`, set the run-up multiplier, and use the
+live monitor. Graceful stop writes a run-local marker and remains usable after a
+GUI restart while the trainer PID is present.
+
+New bounded co-sim checkpoints export with the dedicated
+`MTB-ML-ABS-CoSim.lua` 13-observation/two-axle controller. The Output tab blocks
+legacy unbounded co-sim and 28x16 residual checkpoints instead of silently
+routing them through the incompatible historical four-action controller.

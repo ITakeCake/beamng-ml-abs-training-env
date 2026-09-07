@@ -9,7 +9,8 @@ TRAINING_GUI_SPEC.md.
 Sim guard: this project's beamngpy/BeamNG.tech pairing is pinned; a mismatched
 beamngpy speaks a different wire protocol and fails the handshake outright.
 
-Graceful stop: create STOP_TRAINING.txt next to this file (or pass --stop-file);
+Graceful stop: create STOP_TRAINING.txt inside the run directory (or pass
+--stop-file);
 learn() exits cleanly and the finally block saves model + vecnorm + checkpoint.
 Never taskkill a run -- a hard kill can corrupt the replay buffer/optimizer state.
 
@@ -20,7 +21,9 @@ Usage:
       --total-steps 200000 --run-name residual_ppo_smoke
 """
 import argparse
+import math
 import os
+import re
 import sys
 import time
 
@@ -50,6 +53,11 @@ from sim_config import (
 from compat import check_compat
 from reward_spec import RewardSpec, PRESETS
 from calibration import CalibrationTable, config_key, table_hash
+from bounded_ppo import (
+    ACTION_INTERFACE, DEFAULT_INITIAL_RELEASE, DEFAULT_LOG_STD_INIT,
+    UnitIntervalActorCriticPolicy, has_bounded_action_interface,
+    policy_kwargs as bounded_policy_kwargs,
+)
 
 FRAME_STACK = 16
 HEARTBEAT_STEPS = 2000
@@ -64,7 +72,9 @@ log = None   # set in main() once the run dir (and therefore the log path) is kn
 SAC_DEFAULTS = dict(lr=1e-4, buffer_size=100_000, tau=0.005,
                     target_entropy=-2.0, learning_starts=5_000, train_freq=2)
 PPO_DEFAULTS = dict(lr=1e-4, n_steps=2048, batch_size=512, n_epochs=10,
-                    clip_range=0.2, gae_lambda=0.95, ent_coef=0.005)
+                    clip_range=0.2, gae_lambda=0.95, ent_coef=0.0,
+                    initial_release=DEFAULT_INITIAL_RELEASE,
+                    log_std_init=DEFAULT_LOG_STD_INIT)
 
 # net_arch/activation match the reference trainers exactly (train.py's
 # policy_kwargs for SAC, train_ppo_axle.py's for PPO) -- SB3's own defaults
@@ -97,7 +107,7 @@ class StopFileCallback(BaseCallback):
         self.stop_file = stop_file
 
     def _on_step(self):
-        if self.num_timesteps % 200 == 0 and os.path.exists(self.stop_file):
+        if self.num_timesteps % 10 == 0 and os.path.exists(self.stop_file):
             log.info("STOP file %s detected -> graceful stop at %s steps",
                      self.stop_file, f"{self.num_timesteps:,}")
             return False
@@ -236,6 +246,13 @@ def make_venv(args):
         log.warning("proceeding despite compat check: %s", compat.message)
 
     spec = PRESETS[args.reward]()
+    if spec.step_mode == "distance":
+        raise SystemExit("reward %s scores the distance integral from ground "
+                         "speed, which this backend's reward hook does not "
+                         "carry. Use the co-sim trainer." % spec.name)
+    if spec.slip_term_active():
+        raise SystemExit("reward %s has a per-step slip term; the residual backend's "
+                         "reward hook cannot carry it. Use the co-sim trainer." % spec.name)
     table, calib_path = load_calibration(args)
     log.info("reward=%s hash=%s default=%s | calibration=%s hash=%s",
              spec.name, spec.hash(), spec.is_default(),
@@ -391,8 +408,16 @@ def policy_kwargs_for(args):
     if log is not None:      # module-level `log` is only set inside main()
         log.info("network: %s (%d layers, %s)", net_arch_repr(layers), len(layers),
                  "default" if layers == parse_net_arch("") else "CUSTOM")
-    return dict(activation_fn=th.nn.ReLU,
-                net_arch={"pi": list(layers), value_key: list(layers)})
+    kwargs = dict(activation_fn=th.nn.ReLU,
+                  net_arch={"pi": list(layers), value_key: list(layers)})
+    if args.algo == "ppo":
+        kwargs = bounded_policy_kwargs(
+            kwargs,
+            initial_release=getattr(args, "initial_release",
+                                    DEFAULT_INITIAL_RELEASE),
+            log_std_init=getattr(args, "log_std_init",
+                                 DEFAULT_LOG_STD_INIT))
+    return kwargs
 
 
 def build_model(args, venv):
@@ -405,7 +430,8 @@ def build_model(args, venv):
                    target_entropy=args.target_entropy,
                    train_freq=(args.train_freq, "step"), gradient_steps=1,
                    policy_kwargs=policy_kwargs, verbose=1, device=device)
-    return PPO("MlpPolicy", venv, learning_rate=args.lr, n_steps=args.n_steps,
+    return PPO(UnitIntervalActorCriticPolicy, venv,
+               learning_rate=args.lr, n_steps=args.n_steps,
                batch_size=args.batch_size, n_epochs=args.n_epochs,
                clip_range=args.clip_range, gae_lambda=args.gae_lambda,
                ent_coef=args.ent_coef, policy_kwargs=policy_kwargs,
@@ -426,6 +452,14 @@ def load_resume(args, venv):
             f"--resume checkpoint observation shape {model.observation_space.shape} "
             f"does not match this run's env shape {venv.observation_space.shape} -- "
             f"refusing to resume onto a mismatched policy/env pair.")
+    if args.algo == "ppo" and not has_bounded_action_interface(model):
+        raise RuntimeError(
+            "--resume checkpoint uses the legacy unbounded PPO action interface. "
+            f"New PPO runs require {ACTION_INTERFACE}: a correctly transformed "
+            "[0,1] axle-release distribution whose stored actions match the "
+            "simulator actions. Start a fresh run for this fix; legacy checkpoints "
+            "remain available for evaluation/export but cannot be silently mixed "
+            "into the new training contract.")
     # --net-arch is ignored on resume (the checkpoint's own shape is loaded), so
     # a mismatch would silently train a different network than the box says.
     ckpt_arch = getattr(model.policy, "net_arch", None)
@@ -468,7 +502,8 @@ def parse_args():
     p.add_argument("--port", type=int, default=64291)
     p.add_argument("--run-name", required=True)
     p.add_argument("--resume", default=None)
-    p.add_argument("--stop-file", default=os.path.join(HERE, "STOP_TRAINING.txt"))
+    p.add_argument("--stop-file", default=None,
+                   help="graceful-stop marker (default: inside this run directory)")
     # simulator config -- see sim_config.py; a settings.json (GUI-written or
     # hand-edited) supplies defaults, these flags override individual fields
     p.add_argument("--settings", default=os.path.join(HERE, "settings.json"))
@@ -514,9 +549,10 @@ def parse_args():
     p.add_argument("--grip-lead", type=float, default=0.0,
                    help="apply the grip change this many seconds BEFORE brake "
                         "onset (0 = same physics tick, exact)")
-    p.add_argument("--reward", choices=sorted(PRESETS), default="v5.0",
-                   help="reward preset: v5.0 (frozen default, absolute anchors) or "
-                        "normalized (anchors on measured slam/stock references)")
+    p.add_argument("--reward", choices=sorted(PRESETS), default="v6.0",
+                   help="reward preset: v6.0 (target-free sustained G, default), "
+                        "v5.0 (frozen historical reward), or normalized "
+                        "(anchors on measured slam/stock references)")
     p.add_argument("--calibration", default=None,
                    help="path to a calibration table (default: calibration/<car>.json)")
     p.add_argument("--calibration-car", default=None,
@@ -544,9 +580,37 @@ def parse_args():
     p.add_argument("--clip-range", type=float, default=PPO_DEFAULTS["clip_range"])
     p.add_argument("--gae-lambda", type=float, default=PPO_DEFAULTS["gae_lambda"])
     p.add_argument("--ent-coef", type=float, default=PPO_DEFAULTS["ent_coef"])
+    p.add_argument("--initial-release", type=float,
+                   default=PPO_DEFAULTS["initial_release"],
+                   help="fresh PPO policy's deterministic axle release in (0,1)")
+    p.add_argument("--log-std-init", type=float,
+                   default=PPO_DEFAULTS["log_std_init"],
+                   help="initial standard deviation of PPO's latent Gaussian")
     args = p.parse_args()
     if args.lr is None:
         args.lr = SAC_DEFAULTS["lr"] if args.algo == "sac" else PPO_DEFAULTS["lr"]
+    if (not args.run_name or args.run_name in (".", "..")
+            or re.fullmatch(r"[A-Za-z0-9._-]+", args.run_name) is None):
+        p.error("--run-name may contain only letters, numbers, dot, underscore, or dash")
+    if args.total_steps <= 0:
+        p.error("--total-steps must be positive")
+    if not 1 <= args.port <= 65535:
+        p.error("--port must be from 1 to 65535")
+    try:
+        parse_net_arch(args.net_arch)
+    except ValueError as exc:
+        p.error(str(exc))
+    if not math.isfinite(args.lr) or args.lr <= 0:
+        p.error("--lr must be finite and greater than zero")
+    if args.algo == "ppo":
+        if not math.isfinite(args.initial_release) or not 0 < args.initial_release < 1:
+            p.error("--initial-release must be strictly between 0 and 1")
+        if not math.isfinite(args.log_std_init):
+            p.error("--log-std-init must be finite")
+        if args.n_steps < 2 or args.batch_size < 1 or args.batch_size > args.n_steps:
+            p.error("PPO requires n-steps >= 2 and 1 <= batch-size <= n-steps")
+        if args.n_epochs < 1 or args.ent_coef < 0:
+            p.error("PPO requires n-epochs >= 1 and ent-coef >= 0")
     return args
 
 
@@ -554,6 +618,8 @@ def main():
     args = parse_args()
 
     run_dir = os.path.join(HERE, "runs", args.run_name)
+    if args.stop_file is None:
+        args.stop_file = os.path.join(run_dir, "STOP_TRAINING.txt")
     checkpoint_dir = os.path.join(run_dir, "checkpoints")
     os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -566,10 +632,6 @@ def main():
     pid_path = os.path.join(run_dir, "pid.txt")
     with open(pid_path, "w") as fh:
         fh.write(str(os.getpid()))
-
-    if os.path.exists(args.stop_file):
-        os.remove(args.stop_file)
-        log.info("removed stale stop file %s", args.stop_file)
 
     venv = make_venv(args)
     if args.resume:
