@@ -1,8 +1,8 @@
-# BeamNG ML-ABS Training Environment
+# Reinforcement Learning Based Anti-Lock Braking Systems
 
-Train a machine-learned ABS controller (SAC / PPO) against BeamNG.tech or
-BeamNG.drive, with a GUI that handles simulator setup, car selection, and
-training runs.
+This is a collection of my PPO/SAC experiments on anti-lock braking systems inside of beamng.drive and beamng.tech (Tyvm beamng for the .tech license).
+Currently this project is not suitable for full time use inside of beamng, just yet, as it does not meet or exceed stock ABS performance.
+This project is still in active development and experimentation.
 
 ## The idea
 
