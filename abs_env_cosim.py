@@ -110,10 +110,6 @@ I_BRKA0 = 28                     # applied brake torque fr, fl, rr, rl (Nm)
 # Observation = the MachineTrainerBoy (SAC, 2026-06) 27-value frame plus four
 # slips referenced to the stock ABS speed estimate (never ground truth) plus the
 # four applied (pressure-delayed) brake torques, stacked
-# N_STACK deep, oldest first / newest last, zero history at reset. Every frame
-# is built from the packet just received plus EARLIER frames only: the rates
-# (pitch/roll/wheel accel) are (current - previous) / DT. No channel can
-# contain information from a later tick. Same for every wheel mode.
 FRAME_DIM = 35
 N_STACK = 64                     # 640 ms of history at 100 Hz
 OBS_DIM = FRAME_DIM * N_STACK    # 2240
@@ -677,8 +673,6 @@ class ABSCoSimEnv(gym.Env):
             # The game's own 2 kHz brake metric has latched (it closes at
             # |v| <= 1.0 m/s). Everything after this is a coast to standstill
             # that the metric does not score and the reward barely sees --
-            # 5 s of dead episode, because below 1 m/s rolling resistance
-            # alone is about 0.1 m/s^2.
             self._metric_closed_frames += 1
         if self._seen_moving:
             self._min_binput = min(self._min_binput, float(v[I_BRK]))

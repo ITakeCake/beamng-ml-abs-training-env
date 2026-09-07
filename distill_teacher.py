@@ -101,8 +101,6 @@ def main():
             # Must match train_cosim's fresh-model path exactly: ReLU and a
             # pi/vf net_arch dict. SB3 defaults to Tanh, which silently built a
             # different network from the one the trainer builds, and
-            # export_policy_weights only emits ReLU layers, so a Tanh
-            # checkpoint cannot be deployed to the car at all.
             dict(activation_fn=th.nn.ReLU,
                  net_arch=dict(pi=ppo_cfg.get("net_arch", [256, 256, 256]),
                                vf=ppo_cfg.get("net_arch", [256, 256, 256]))),

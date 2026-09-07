@@ -1378,7 +1378,6 @@ class ResidualTrainerGUI:
         # Read the whole file and let parse_progress find the last run marker,
         # rather than seeking to a byte offset captured at launch: the runner's
         # log handler may truncate or reopen the file, which leaves that offset
-        # pointing past everything since written and freezes the bar at "1 of N".
         prog = calprog.parse_progress(text, total_stops=st["planned"])
         st["bar"]["value"] = prog["stops_done"]
         st["status"].set(calprog.describe(prog))

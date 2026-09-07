@@ -32,8 +32,6 @@ def test_export_model_to_game_merges_without_clobbering_a_sibling(tmp_path, monk
         # matches the REAL exporter's behavior: it does NOT create its own
         # output directory (bare `open(out_path, "w")`), the caller must.
         # A mock that auto-mkdir's here would hide exactly the bug this
-        # caught live: export_model_to_game calling the exporter before the
-        # directory existed.
         out_path = cmd[cmd.index("--out") + 1]
         with open(out_path, "w") as fh:
             fh.write("-- fake weights\n")

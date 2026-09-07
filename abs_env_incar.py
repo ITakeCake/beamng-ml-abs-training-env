@@ -56,9 +56,6 @@ CONTROLLER_NAME = 'MTB-ML-ABS'
 # The DEPLOY car: this .pc has the ABS slot + MTB-ML-ABS controller loaded. The
 # training car (Machine-Trainer-Boy.pc, parent default) has NO ABS slot, so the
 # controller would never load. We MUST force the MLABS car here.
-# (PPO_V2, 2026-07-11): switched to Machine-Trainer-Boy-V2, etk800 SEDAN
-# Rennspecht build on sport_plus tires (same platform class as the 1FEX 1.283g
-# baseline). V2-MLABS = V2 byte-identical except etk_DSE_ABS -> etk_DSE_ABS_MTB_ML.
 VEHICLE_PC_INCAR = 'vehicles/etk800/Machine-Trainer-Boy-V2-MLABS.pc'
 
 # Hard ceiling on engage+warmup ride-through (spec §4.3): 400 ticks @200Hz = 2.0s.
@@ -192,7 +189,6 @@ class ABSLearningEnvIncar(ABSLearningEnv):
         # Arm the brake-event distance state machine BEFORE throttle (parent semantics).
         # The controller's onEngage() will call resetAccum() again, but setTargetSpeed
         # here is what makes last_brake_dist / last_brake_avg_g (the terminal reward
-        # inputs) get measured exactly as the parent does.
         measure_target = target_ms - 1.0
         self.vehicle.queue_lua_command("extensions.abstelemetry.resetAccum()")
         self.vehicle.queue_lua_command(
@@ -217,13 +213,6 @@ class ABSLearningEnvIncar(ABSLearningEnv):
         # --- (PPO_V2, 2026-07-11) 2kHz-EXACT BRAKE ONSET ---
         # Throttle off at target+2mph, flip to DETERMINISTIC immediately, then arm the
         # in-Lua slam: abstelemetry.onPhysicsStep checks instSpeed (obj:getVelocity()
-        # :length(), the SAME signal the standard brake metric uses) every 0.5ms tick
-        # and latches input.brake=1 on the exact tick of the target crossing. The old
-        # Python coast loop polled stale electrics at ~50Hz WALL-CLOCK, onset could
-        # land tenths of a mph late. The chunked stepping below is just transport;
-        # onset precision comes from the 2kHz in-Lua check, not the chunk size.
-        # Coast is IN GEAR (drive), no neutral shift here; the car stays in gear
-        # through the stop until ~2.5 mph, where step() drops it to neutral once.
         self.vehicle.control(throttle=0.0, steering=0)
         self.bng.control.pause()
         self.bng.settings.set_deterministic(DETERM_HZ)
@@ -247,10 +236,6 @@ class ABSLearningEnvIncar(ABSLearningEnv):
         # ====================================================================
         # IN-CAR HANDOFF (the divergence from parent): the pedal is already
         # latched in-Lua at the exact crossing; mirror it from the game-input
-        # side so beamngpy's input state agrees. Controller engage fires on
-        # driverBrake>0.9 && speed>8.0 -> onEngage -> resetAccum + warmup.
-        # (PPO_V2) IN GEAR, no gear=0. Car stays in drive until ~2.5 mph.
-        # ====================================================================
         self.vehicle.control(brake=1.0, throttle=0.0)
         # Re-assert ext mode AGAIN after the teleport re-init (defensive; also done
         # in the loop below).
@@ -317,8 +302,6 @@ class ABSLearningEnvIncar(ABSLearningEnv):
         # Keep the driver pedal slammed so the controller stays engaged. The deployed
         # controller overwrites input.brake with maxBrake internally anyway, so this
         # is purely "stay engaged", the controller's per-wheel cmd comes from setExtCmd.
-        # (PPO_V2) Stay in DRIVE until ~2.5 mph, then drop to NEUTRAL exactly once
-        # (the chosen regime, avoids auto-box creep fighting the final stop).
         if not self._neutral_dropped and self._last_gps_speed < 1.118:  # 2.5 mph
             self.vehicle.control(brake=1.0, gear=0)
             self._neutral_dropped = True
@@ -338,9 +321,6 @@ class ABSLearningEnvIncar(ABSLearningEnv):
         # =================================================================
         # REWARD v5.0, BYTE-IDENTICAL arithmetic, non-draining input sources.
         # =================================================================
-        # Inputs (see mapping table §4.5):
-        #   gy_avg  -> published obs[4] (== controller's gy_avg, mlabs_o4)
-        #   yaw_avg -> published obs[6] (== controller's yaw_avg, mlabs_o6)
         braking_g_ms2 = float(obs[4])
         yaw_rate = float(obs[6])
         self.prev_heading_error = 0.0  # placeholder set below for legacy compat
@@ -410,17 +390,6 @@ class ABSLearningEnvIncar(ABSLearningEnv):
         # ─── stop-detect speed: NON-draining source ──
         # Parent's stop gate (abs_env.py:936) uses data['inst_speed'] with a fallback to
         # data['airspeed'], both are BODY/GPS velocity that reach ~0 at standstill. We
-        # MUST match that: use the stock non-draining 'airspeed' electric here.
-        #
-        # NOTE (validated in-sim, 2026-06-05): tel_fused_speed CANNOT be used for the stop
-        # gate. abstelemetry's fused-speed integrator only re-syncs DOWNWARD on brake
-        # RELEASE; because this env holds brake=1.0 every step, the integrator stays in its
-        # isBraking branch and PLATEAUS (~0.7 m/s) at a true standstill, so it never crosses
-        # the 0.05 threshold -> STOP never fires -> every episode TIMEOUTs at 5000 steps with
-        # no terminal g-reward. 'airspeed' read 0.002 m/s at the same standstill and stays
-        # truthful under lockup (it is not wheel-derived). It is non-draining (stock electric,
-        # populated independently of buildSensorData). tel_fused_speed is still read below
-        # for the speed-tracking stat only (never gates the episode).
         gps_speed = float(e.get('airspeed', 999.0))
         self._last_gps_speed = gps_speed
 
@@ -463,8 +432,6 @@ class ABSLearningEnvIncar(ABSLearningEnv):
             # Terminal: disarm the in-Lua pedal latch FIRST (it re-asserts
             # input.brake=1 every physics tick), then release the driver brake so
             # the controller disengages, step, then read the brake-event terminal
-            # values. These are published by updateGFX (60Hz) and do NOT drain the
-            # poll window: tel_last_brake_avg_g / tel_last_brake_dist.
             self.vehicle.queue_lua_command("extensions.abstelemetry.disarmBrakeSlam()")
             self.vehicle.control(brake=0.0)
             self.bng.step(5)

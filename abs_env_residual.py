@@ -86,14 +86,6 @@ def _resolve_cpu_cores(cfg, total_cores):
 # ---------------------------------------------------------------- reward spec
 # abs_env_incar binds every reward constant and _terminal_g_shape into its OWN
 # module namespace (`from abs_env import ...`) and reads them as globals inside
-# step(). Rebinding those names therefore redirects the parent's own reward
-# computation, the same seam already used for HEADLESS / MAP_NAME /
-# VEHICLE_PC, and what makes duplicating ~150 lines of step() (with its drift
-# risk) unnecessary. abs_env itself is never touched.
-#
-# LIMITATION: these are module globals, so one spec applies per PROCESS, not
-# per env instance. Fine for this project (DummyVecEnv with a single env); a
-# multi-env setup with differing specs would need the duplication instead.
 _REWARD_NAMES = (
     "PER_STEP_K", "PER_STEP_G_GATE", "YAW_BONUS_K_STEP", "YAW_BONUS_ALPHA",
     "YAW_BONUS_K_TERMINAL", "YAW_BONUS_THRESHOLD", "YAW_PEN_K_TERMINAL",
@@ -318,8 +310,6 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # Overrides the policy's action every step. force_action=(0,0) is the
         # pure-slam control: zero release means full pedal, the genuine
         # worst-case brake input, which is what a "floor" measurement needs --
-        # a policy sampling releases uniformly on [0,1] brakes at roughly half
-        # pedal and is nowhere near the grip limit.
         self._force_action = (None if force_action is None
                               else np.asarray(force_action, dtype=np.float64))
         # None => "stock": grip is never touched, and _draw_grip returns 1.0 so
@@ -347,8 +337,6 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
             # HEADLESS/MAP_NAME are read as module globals inside abs_env's
             # __init__ body, not passed as parameters, same seam
             # abs_env_incar.py already uses for VEHICLE_PC. Only touched when
-            # sim_config is explicitly given, so an existing caller that never
-            # passes one launches exactly as before.
             abs_env.HEADLESS = headless
             abs_env.MAP_NAME = map_name
             log.info("sim_config: game=%s headless=%s map=%s port=%s "
@@ -362,7 +350,6 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # AFTER the parent built self.bng and ran its scenario setup: the setup
         # is a handful of calls and wants ordinary stepping, while the seam is
         # only about the per-step hot loop. sim_clock.wrap returns the handle
-        # untouched when deterministic, so the default path is byte-identical.
         self.deterministic = bool(deterministic)
         self.train_speed_factor = float(train_speed_factor)
         self.bng = sim_clock.wrap(self.bng, deterministic=self.deterministic,
@@ -370,7 +357,6 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # The frame limiter is deliberately LEFT ALONE. Removing it makes step()
         # return without advancing physics, 16.5 python steps per controller
         # tick, measured, so episodes never reach the stop and score zero.
-        # See the block in sim_clock.py and `stage_probe.py --uncap on`.
         self.pedal_range = pedal_range          # None => constant 1.0
         self.episode_pedal = 1.0
         low = np.concatenate([self.observation_space.low, [0.0]]).astype(np.float32)
@@ -461,7 +447,6 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # Tire grip is drawn per episode and applied AT BRAKE ONSET (see
         # GripArmInjector): the acceleration and coast approach always run at
         # stock grip, so a low-grip episode still reaches its target speed.
-        # `grip` stays 1.0 when no spec was given, "stock", never touched.
         self.grip = self._draw_grip()
         self._ring.clear()
         self._yaw_trace.clear()
@@ -505,10 +490,6 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # Parent's reset() has already engaged the controller with a hardcoded
         # brake=1.0 (abs_env_incar.py:254), required, since engage needs
         # driverBrake > threshold and episode_pedal may be well below that. This
-        # call is INERT: abs_env_incar.py's step() re-asserts brake=1.0 every tick
-        # (module docstring), so whatever is set here is overwritten before the
-        # next physics step anyway. Kept only as a harmless statement of intent
-        # for a reader of this method, not because it has any physics effect.
         self.vehicle.control(brake=float(self.episode_pedal))
         info["episode_pedal"] = self.episode_pedal
         return self._append_pedal(obs), info
@@ -525,12 +506,6 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # Sign from the spec, magnitude from the table. config_key carries no
         # turn direction, so a row measured on a right-hander would otherwise
         # steer right while target_yaw_rate demanded left, yaw error of 2v/R
-        # for the whole episode and a guaranteed "crash" that is pure
-        # bookkeeping. Reusing the magnitude assumes the two directions are
-        # symmetric, which holds on the flat, featureless calibration map.
-        # Steering is a property of the corner geometry, not of how hard the
-        # brakes are pressed, so it is looked up at the full-pedal key rather
-        # than duplicated per pedal level.
         return self._corner.direction * abs(self._calibration.steering_for(
             config_key(grip=self.grip, speed_mph=self.target_mph,
                        radius_m=self.radius_m)))
@@ -545,8 +520,6 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # NOT self._last_gps_speed: the parent resets that to 999.0 and only
         # fills it in partway through its own step(), so reading it before the
         # first step would ask for 999/R rad/s of yaw, one step of that
-        # exhausts the entire terminal yaw budget and triggers the catastrophic
-        # backstop on every corner episode.
         self._corner_speed = self.start_speed_ms
         self._entry_yaw_target = 0.0
         self._entry_yaw_actual = None    # filled on the first step
@@ -596,8 +569,6 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
         # Parent step() maps its 4-float action via brakes = 0.01+0.99*a then
         # clip(0.01,1.0) (abs_env_incar.py:307-308) before mailboxing via setExtCmd.
         # Invert that mapping so the mailboxed per-wheel commands are EXACTLY our
-        # (fr, fl, rr, rl). residual_to_brakes already floors each output at 0.01,
-        # so the inverted value is guaranteed to land in [0,1].
         parent_action = (np.array([fr, fl, rr, rl]) - 0.01) / 0.99
         try:
             obs, reward, terminated, truncated, info = super().step(parent_action)
@@ -611,7 +582,6 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
             # The protected parent's TIMEOUT branch predates a fixed timeout
             # penalty, and its STOP branch predates v6's capped stability guard.
             # The logging overrides below apply the same adjustment to CSV and
-            # audit output.
             reward += self._terminal_reward_adjustment(self._outcome())
 
         # The parent has just overwritten current_heading from telemetry, and
@@ -683,7 +653,6 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
             # Turn-in check: how much of the demanded rotation the car had
             # actually reached by the first braking step. Well under 1.0 means
             # the wheel went on too late for the turn to establish, and the
-            # yaw-error integral is measuring the procedure, not the controller.
             entry = self._entry_yaw_actual or 0.0
             frac = (entry / self._entry_yaw_target) if self._entry_yaw_target else 0.0
             log.info("episode %d yaw trace: %s | entry_yaw actual=%.3f "
@@ -693,8 +662,6 @@ class ABSLearningEnvResidual(ABSLearningEnvIncar):
             # Where the car ENDED UP pointing versus where the arc says it
             # should. The reward only grades the yaw RATE error integrated over
             # time, which a car that lags and then over-rotates can pass while
-            # finishing at the wrong heading, the two errors cancel in the
-            # integral but not on the road. Diagnostic only; nothing scores it.
             import math as _math
             h = self._heading
             log.info("episode %d heading: swept=%.1fdeg intended=%.1fdeg "

@@ -32,7 +32,6 @@ MIN_REFERENCE_GAP_G = 0.01
 # Pedal is quantised to 2 decimals (residual_core.PEDAL_DP) precisely because
 # it is part of this key: every distinct value needs its own measured
 # slam/stock pair, so 3 decimals would put a "0.5-1.0" range at 501
-# uncalibratable levels.
 PEDAL_DP = 2
 FULL_PEDAL = 1.0
 
@@ -113,8 +112,6 @@ class CalibrationTable:
     # Corner configs only: the open-loop steering angle measured to hold the
     # row's radius, keyed the same way the rows are. Stored beside the
     # references because it is part of the procedure they were measured with --
-    # a corner reference measured at one angle is not a ruler for a run driven
-    # at another.
     steering: dict = dataclasses.field(default_factory=dict)
 
     def put(self, key, reference, summary):

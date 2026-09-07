@@ -44,8 +44,6 @@ RIGHT = -1
 # Guard for the parent's `heading_error = abs(current - target)`: both sides are
 # raw obj:getDirection() radians, which wrap at +-pi. Straight-line episodes never
 # noticed because the target never moved. A corner rotates the target up to ~90
-# deg, so an episode that starts near +-pi would cross the branch cut mid-stop and
-# the parent would read a ~2pi error, an instant, entirely fictional CRASH.
 HEADING_BRANCH_MARGIN = 0.20  # rad of clearance demanded from +-pi
 
 

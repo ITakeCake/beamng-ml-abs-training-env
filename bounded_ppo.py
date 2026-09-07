@@ -34,7 +34,6 @@ DEFAULT_LOG_STD_INIT = 0.0       # SB3 default spread; samples cover ~0.12..0.88
 # Pre-tanh mean is soft-bounded to +-3 (tanh'(3) ~ 0.01, release 0.0025..0.9975):
 # beyond ~8.7 float32 tanh rounds to an exact endpoint, the stored action loses
 # the latent, and the -log_prob entropy estimate then grows without bound in the
-# mean (PPO-52 NaN, 2026-09-04). The env's 0.01 brake floor covers the top end.
 LATENT_MEAN_BOUND = 3.0
 
 

@@ -31,8 +31,6 @@ class _ShortName(logging.Filter):
 # beamngpy logs one INFO line per bng.step() call. At FRAME_SKIP=1 that is one
 # line per 5 ms of simulated time: PPO-05 wrote 475,355 "Advancing the simulation
 # by 1 steps" lines into a 37 MB log for a single run, which buries the ~450 lines
-# that actually say what happened and costs a formatted record + file write on
-# every step of the hot loop.
 BEAMNGPY_LOGGERS = ("beamngpy", "beamngpy.BeamNGpy", "beamngpy.Vehicle",
                     "beamngpy.Scenario", "beamngpy.Camera", "beamngpy.Sensor")
 

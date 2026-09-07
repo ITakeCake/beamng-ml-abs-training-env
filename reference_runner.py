@@ -180,10 +180,6 @@ class ReferenceRunner:
         # The Lua latch decides the exact TICK the pedal goes down, but
         # vehicle.control is what actually applies it: the game's ~60 Hz input
         # update re-propagates whatever vehicle.control last said, so leaving it
-        # at 0 means the latch's write is overwritten 60 times a second and the
-        # car coasts on engine braking alone (~0.6 m/s^2, measured). Stepped
-        # mode re-sent this every step and the file's own comment says why --
-        # "the car simply never stopped", which is exactly what happened here.
         self.vehicle.control(brake=float(pedal), throttle=0.0)
         deadline = time.monotonic() + 90.0
         result_g = 0.0
@@ -320,7 +316,6 @@ class ReferenceRunner:
             # tel_inst_speed is computed in onPhysicsStep; electrics.airspeed is
             # GFX-rate and LAGS when physics outruns graphics, exactly what
             # abstelemetry v3.3's own comment warns about at speed_factor > 1.
-            # Reading the laggy one at 10x overshoots the target badly.
             spd = float(e.get("tel_inst_speed", e.get("airspeed", 0.0)))
             if spd >= accel_target_ms:
                 reached = True
@@ -343,8 +338,6 @@ class ReferenceRunner:
         # --- 2 kHz-exact brake onset (identical to training) ---
         # Pedal goes to the LATCH, not just to vehicle.control: the latch
         # re-asserts input.brake every 0.5 ms tick and would otherwise stamp
-        # full pedal over the level being measured, writing a full-pedal result
-        # under a part-pedal key.
         self.vehicle.queue_lua_command(
             f"extensions.abstelemetry.armBrakeSlam({target_ms}, {float(pedal)})")
         # Grip is armed the SAME way training arms it (at brake onset, after the
@@ -376,11 +369,6 @@ class ReferenceRunner:
         # --- ride the stop out (identical regime to abs_env_incar.step) ---
         # The pedal must be re-sent from the Python side every step, not just
         # latched in Lua: the game's own input update runs at ~60 Hz and will
-        # otherwise write input.brake back down from the last vehicle.control
-        # value, fighting the 2 kHz latch (observed live, the car simply never
-        # stopped). Training sends brake=1.0 every step for exactly this reason.
-        # The one-shot neutral drop below ~2.5 mph is also training's regime:
-        # the automatic box creeps against the brakes at walking pace otherwise.
         stop_timer = 0
         stopped = False
         neutral_dropped = False
@@ -388,13 +376,6 @@ class ReferenceRunner:
             # Nothing here paces the physics, so tracking speed from Python is
             # hopeless: at ~5x realtime a 50 ms wall poll sees the car once per
             # 250 ms of sim time, which is several mph of coast per sample --
-            # easily enough to miss the target crossing entirely.
-            #
-            # It does not need to. The 2 kHz latch, the pedal hold and the whole
-            # brake-event accumulator run in Lua; the ONLY thing Python needs is
-            # the finished result, which Lua publishes as tel_last_brake_avg_g_arc
-            # when the event completes. So wait for that, and let the game get on
-            # with it.
             self.vehicle.sensors.poll()
             prev_g = float(self.vehicle.sensors["electrics"]
                            .get("tel_last_brake_avg_g_arc", 0.0))
@@ -543,7 +524,6 @@ class ReferenceRunner:
             # The seek itself only uses |yaw|, so an inverted sign convention
             # between beamngpy steering and tel_yaw_rate_inst would pass here
             # and only surface in training, as a car steering one way while the
-            # reward demands the other. Catch it on the first probe instead.
             if mean_yaw * direction <= 0.0:
                 raise RuntimeError(
                     f"steering {direction * steering:+.4f} produced yaw "

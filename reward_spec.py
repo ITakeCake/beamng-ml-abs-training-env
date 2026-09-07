@@ -65,7 +65,6 @@ class RewardSpec:
     # --- v6 dense reward -----------------------------------------------
     # ``shape`` preserves the v5/normalized one-sample reward.  The rolling
     # mode must be evaluated through make_step_tracker(), because its score
-    # depends on recent samples and the real simulation dt.
     step_mode: str = "shape"
     # "inst": per-step G is the raw 2 kHz sample (v6). "window": the 10 ms
     # speed-delta average abstelemetry publishes (tel_win_gy_avg), far cleaner.
@@ -74,9 +73,6 @@ class RewardSpec:
     # --- FastTrain v3.3 clone ("v3.3") ---------------------------------
     # shape_mode "v33": g clamped to [0.4, 2.0] then affine -140 .. +2100 with
     # breakeven at 0.5 g, plus a terminal-only log gatekeeper bonus above
-    # v33_gate_g. Per-step (step_mode "v33_step") uses the same affine without
-    # the gate, scaled by per_step_k. Heading terms are per step: -k*err^2 plus
-    # recovery_k * (prev_err - err), err = |integrated yaw rate| in rad.
     shape_mode: str = "ramp"
     v33_gate_g: float = 1.06
     v33_gate_k: float = 2500.0
@@ -90,7 +86,6 @@ class RewardSpec:
     # --- optional terminal stability guard -----------------------------
     # This is a safety constraint around the G objective, not a per-step yaw
     # target. Cost is zero through the dead zone, rises quadratically, and is
-    # capped at yaw_stability_penalty_max.
     yaw_stability_deadzone: float = 0.0
     yaw_stability_full_scale: float = 0.0
     yaw_stability_penalty_max: float = 0.0
@@ -98,8 +93,6 @@ class RewardSpec:
     # --- v7 per-step banded slip term ----------------------------------
     # Per wheel, per second: +slip_ok_k while slip <= slip_ok_max (v7 uses a
     # NEGATIVE ok_k: any positive per-step term rewards long coasting stops),
-    # -slip_pen_k between the bands, -slip_lock_k at/above slip_lock_min.
-    # Averaged over the wheels and scaled by dt.  All zero = term disabled.
     slip_ok_k: float = 0.0
     slip_pen_k: float = 0.0
     slip_lock_k: float = 0.0
@@ -109,25 +102,17 @@ class RewardSpec:
     # --- v11: confine the distance integral to the scored window -------
     # The env couples ~4.5 m/s above the 80 mph trigger and the metric only
     # opens at the crossing, so a policy that does not brake coasts ~19 s and
-    # ~760 m before it is scored at all, fourteen times the ~55 m the metric
-    # actually measures. metric_window_only charges the distance integral only
-    # while tel_brake_active is set, making the dense sum exactly minus the
-    # scored stopping distance; approach_time_k is a flat per-second cost
-    # outside that window so the approach cannot be dawdled through instead.
     metric_window_only: bool = False
     approach_time_k: float = 0.0
 
     # --- v9 distance-integral dense term -------------------------------
     # Per step: -speed_cost_k * ground_speed * dt.  Summed over the episode
     # this is exactly -speed_cost_k * metres travelled, so the dense signal
-    # IS the scored quantity. 0 = term disabled.
     speed_cost_k: float = 0.0
 
     # --- normalization -------------------------------------------------
     # False: `g` is absolute g and the anchors above are absolute (v5.0).
     # True:  `g` is first mapped through calibration.normalized_g() so that
-    #        0 = measured lockup and 1 = measured stock ABS on THIS config,
-    #        and the anchors above are in those normalized units.
     normalize: bool = False
 
     name: str = "custom"

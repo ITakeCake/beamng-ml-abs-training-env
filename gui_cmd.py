@@ -145,7 +145,6 @@ def build_calibration_cmd(settings, car, reps=3):
     # Pedal keys a calibration row too: references measured at full pedal do
     # not describe a half-pedal stop, which physically cannot reach the
     # full-pedal lockup floor. Only the levels the training run can actually
-    # draw are measured, "off" means full pedal, which is the default.
     if settings.get("pedal_random") and settings.get("pedal_spec"):
         spec = parse_pedal_spec(settings["pedal_spec"])
         levels = spec.levels() if spec else None
@@ -182,7 +181,6 @@ def validate_calibration_settings(settings):
             # Judge a range by how long it would actually TAKE, not by its level
             # count. Fast mode measures a stop in ~4 s instead of ~35 s, which
             # turns 0.5-1.0 (51 levels) from about six hours into about twenty
-            # minutes, so the old blanket refusal is now simply wrong.
             import calibration_progress as _cp
             from residual_core import parse_speeds as _ps, parse_grip_spec as _pg
             try:

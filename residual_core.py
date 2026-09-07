@@ -57,8 +57,6 @@ def parse_speeds(text):
 # Pedal is quantised to 2 decimals, and that is a HARD constraint rather than a
 # tidiness choice: pedal position is part of the calibration key, so every
 # distinct value needs its own measured slam/stock pair (~7 min each). At 3
-# decimals a "0.5-1.0" range spans 501 levels and could never be calibrated;
-# at 2 it spans 51, and a sensible list of a handful is a morning's work.
 PEDAL_DP = 2
 PEDAL_MIN, PEDAL_MAX = 0.1, 1.0
 
@@ -229,8 +227,6 @@ def parse_grip_spec(text):
 # --- network shape ---------------------------------------------------------
 # Deployment ceiling, not a training one: the trained weights are exported into
 # a Lua controller that runs the network by hand every 0.5 ms physics tick
-# inside BeamNG. Depth costs latency there, and a net that cannot keep up does
-# not fail loudly, it just misses ticks.
 NET_MAX_LAYERS = 24
 NET_MAX_WIDTH = 2048
 NET_MIN_WIDTH = 8

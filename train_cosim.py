@@ -595,8 +595,6 @@ def main():
     # A 2240x256x256x256x4 forward pass costs 0.236 ms across torch's default 10
     # threads and 0.114 ms on one: the network is far too small to pay for thread
     # synchronization, and those threads also contend with the simulator for
-    # cores. At 400 Hz the whole control period is 2.5 ms, so this is latency
-    # that directly becomes late brake commands.
     th.set_num_threads(1)
 
     stop_file = os.path.join(run_dir, cfg.get("stop_file", "STOP_TRAINING.txt"))
@@ -657,17 +655,12 @@ def main():
             # A policy distilled against FIXED observation statistics is scored
             # with those same statistics, and it is sensitive to them: PPO-66
             # resumed a 1.195 g checkpoint and fell to 0.5 g within four
-            # episodes as the running mean drifted under it. freeze_obs_norm
-            # keeps the parent's statistics exactly as trained.
             venv.training = not bool(cfg.get("freeze_obs_norm", False))
             venv.norm_reward = False
             model = PPO.load(resume["checkpoint"], env=venv, device=device)
             # PPO.load takes its hyperparameters from the SAVED model, so a
             # checkpoint built elsewhere (a distilled one, say) silently imposes
             # whatever it was constructed with, SB3 defaults of lr 3e-4,
-            # gamma 0.99, lambda 0.95, no target_kl. Every resume before this
-            # ran at 30x the configured learning rate while the log claimed
-            # otherwise. Apply the run's configuration explicitly.
             model.learning_rate = ppo["lr"]
             model.lr_schedule = get_linear_fn(ppo["lr"], ppo["lr"], 1.0)
             model.n_steps = ppo["n_steps"]

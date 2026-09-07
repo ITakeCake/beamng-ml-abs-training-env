@@ -31,14 +31,6 @@ MAX_MPH = 100
 # --- LSTM DATA RECORDING ---
 # run EXACTLY ONE recorder, the 99-col 2kHz one.
 #   RECORD_LSTM=True      -> lstm2khz.lua, 99-col raw 2kHz format -> recorded_data_2khz/SAC/
-#   RECORD_SAC_DATA=False -> the old 27-col SAC-Data export is OFF (never run both)
-# Root cause of the earlier 0-CSV failure (fixed in reset()):
-#   vehicle.teleport(reset=True) UNLOADS vehicle lua extensions. abstelemetry was
-#   re-loaded right after the teleport but lstm2khz was NOT, so every guarded call
-#   ("if extensions.lstm2khz then ...") silently no-opped from episode 2 onward.
-#   Fix = reload lstm2khz beside abstelemetry each reset + verify before
-#   startRecording (the proven lstm_data_env.py pattern). vlua sandbox: relative
-#   filename writes land in the .tech userpath; _finish_lstm() moves each CSV out.
 RECORD_LSTM     = True
 RECORD_SAC_DATA = False
 LSTM_DATA_DIR = os.path.normpath(os.path.join(
@@ -50,13 +42,6 @@ LSTM_LUA_SRC  = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
 # --- REWARD CONFIG (v5.0 2026-05-08: 33/33/33 split at "okayish" reference) ---
 # Three positive sources sized to ~equal contribution at reference episode (1.05g, perfect yaw, ~900 steps):
 #   1) Per-step g-force      ~1000 contribution
-#   2) Terminal g-force      ~1000 contribution
-#   3) Yaw bonus (per-step + terminal)  ~1100 contribution
-# Above 1.06g "gatekeeper": +500 step jump, then quadratic explosive growth (open-ended).
-# Negative backstops:
-#   - Crash penalty (catastrophic heading deviation)
-#   - Terminal yaw accumulator (catastrophic yaw integral)
-#   - Sub-0.5g coasting punished by negative ramp
 GATEKEEPER_G        = 1.06       # threshold above which the step jump + quadratic fire
 TERMINAL_STEP_BONUS = 500.0      # instant jump at the gatekeeper crossing
 TERMINAL_QUAD_K     = 200000.0   # quadratic coefficient for explosive growth above gatekeeper
@@ -178,10 +163,6 @@ class ABSLearningEnv(gym.Env):
         # EXPERIMENTAL: set_velocity did not actually move the vehicle on BeamNG.drive
         # consumer (API call accepted but had no physical effect). Disabled for now.
         # try:
-        #     self.vehicle.set_velocity(26.8, dt=1.0)
-        #     print(f"{self._prefix} set_velocity(26.8, dt=1.0) called.")
-        # except Exception as e:
-        #     print(f"{self._prefix} set_velocity FAILED: {e}")
 
         # (TCP_NODELAY already set by beamngpy internally, no extra work needed)
 
@@ -344,8 +325,6 @@ class ABSLearningEnv(gym.Env):
         # ─── LSTM training data export (27-col SAC-Data, OPTIONAL) ────
         # DISABLED by default only ONE recorder may run,
         # and it's the 99-col lstm2khz layer (RECORD_LSTM above). Flip
-        # RECORD_SAC_DATA=True only if you explicitly want the old 27-col
-        # v2-trainer format INSTEAD of (never alongside) the 99-col recorder.
         self._lstm_file = None
         self._lstm_writer = None
         self._lstm_frame = 0   # per-episode frame counter (resets on new episode)
@@ -483,11 +462,6 @@ class ABSLearningEnv(gym.Env):
         # Arm g-force state machine BEFORE throttle
         # measure_target is the brake event START speed (state machine arms when
         # instSpeed crosses below this). Set well below target_ms so the state
-        # machine reliably arms regardless of electrics.airspeed↔instSpeed lag
-        # (Mode 2 coast loop uses electrics.airspeed; lua state uses instSpeed ,
-        # the gap can be ~0.1-0.3 m/s, so 1.0 m/s margin gives clean headroom).
-        # avg_g calculation is unaffected, it's a property of deceleration, not
-        # start speed (uniform decel: avg_g is identical from any start).
         measure_target = target_ms - 1.0  # ~2.2 mph below target
         self.vehicle.queue_lua_command("extensions.abstelemetry.resetAccum()")
         self.vehicle.queue_lua_command(
@@ -497,7 +471,6 @@ class ABSLearningEnv(gym.Env):
         # --- Throttle up (NON-DETERMINISTIC: sim runs free, no Python gating) ---
         # Determinism gates physics on bng.step() calls, so accel-up under determinism
         # crawls at ~25x slow-mo. Switch to free-running, poll sensors with time.sleep,
-        # then flip back to deterministic right before ML control begins.
         self.bng.settings.set_nondeterministic()
         self.bng.control.resume()  # un-pause sim so it actually advances in free-run
 
@@ -592,7 +565,6 @@ class ABSLearningEnv(gym.Env):
         # v5.0 (revised): action ∈ [0,1] maps to brake ∈ [0.01, 1.0], tiny 1%
         # floor so the lua brake-event state machine never resets mid-measurement.
         # Lua threshold is 0.001 (v3.2), ours is 0.01, comfortable safety margin.
-        # Model still has ~99% of full release range for real-ABS modulation.
         brakes = 0.01 + 0.99 * action[:4].astype(np.float64)
         # Speed-guesser action removed (Rule 2). predicted_speed retained as constant 0
         # so downstream CSV/logging code that references it continues to work harmlessly.
@@ -647,12 +619,6 @@ class ABSLearningEnv(gym.Env):
         # speedup #3: per-step speed_prediction CSV write skipped (diagnostic-only,
         # predicted_speed is hardcoded 0 since removal of the speed-guesser action).
         # If you ever need this back, uncomment:
-        # self._spd_writer.writerow([
-        #     self.episode_count, self.steps_taken,
-        #     round(predicted_speed, 2), round(gps_speed, 2),
-        #     round(spd_error, 2), round(spd_error_pct, 1),
-        #     round(yaw_rate, 4), 1 if high_yaw else 0,
-        # ])
 
         # ─── LSTM data row (27-col SAC-Data, only when RECORD_SAC_DATA) ───
         # Per-episode session_id so LSTM training respects brake-event boundaries.
@@ -708,7 +674,6 @@ class ABSLearningEnv(gym.Env):
         # ─── v5.0 PER-STEP G-FORCE REWARD ────────────────────────────
         # Per-step = PER_STEP_K × terminal_shape(g_instantaneous).
         # ~1000 contribution at the okayish reference (1.05g, 900 steps).
-        # Below 0.5g: negative ramp (anti-coast). Above 1.06g: +500 jump + quadratic growth.
         step_g_rew = PER_STEP_K * _terminal_g_shape(braking_g_gs)
         reward += step_g_rew
         self.ep_step_g_sum += step_g_rew
@@ -721,9 +686,6 @@ class ABSLearningEnv(gym.Env):
         # ─── v5.0 YAW: target-driven (deviation from requested yaw rate) ──
         # All three signals (per-step bonus, cumulative, catastrophic backstop)
         # operate on `yaw_error = |actual − target|`. With target=0 (current),
-        # this is identical to the |yaw_rate| version. Adding steering input
-        # later only requires populating self.target_yaw_rate; the reward shape
-        # automatically adapts to "match what the driver is asking for."
         yaw_rate_mag = abs(yaw_rate)                       # diagnostics only (ep_max_yaw)
         yaw_error = abs(yaw_rate - self.target_yaw_rate)   # deviation from requested
 

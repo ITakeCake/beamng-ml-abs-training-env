@@ -30,8 +30,6 @@ def test_default_userpath_does_not_include_current():
     # BeamNG.exe manages a "current" version-subfolder ITSELF under whatever
     # -userpath it's given, passing a path that already ends in "current"
     # makes the game create/use <userpath>/current/current (confirmed live,
-    # 2026-08-29: game log showed "userpath = ...\current\current\" after
-    # launching with user=default_userpath("tech")).
     assert not default_userpath("tech").rstrip("\\/").endswith("current")
     assert not default_userpath("drive").rstrip("\\/").endswith("current")
 
@@ -200,7 +198,6 @@ def test_resolved_userpath_normalizes_trailing_slash_variants():
 # --- detect_game_version: the ini file BeamNG itself maintains is a far more
 # reliable version source than guessing from the folder name (Steam installs
 # like BeamNG.drive commonly have no version in their folder name at all --
-# confirmed live 2026-08-29 against D:\SteamLibrary\...\BeamNG.drive) ---
 from sim_config import detect_game_version
 
 

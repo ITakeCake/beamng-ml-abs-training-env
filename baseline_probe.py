@@ -160,8 +160,6 @@ def main():
         # Band is 0.7-1.05g, deliberately wider than the ~0.85-0.95g figure quoted
         # elsewhere for a DIFFERENT car/tire config, this vehicle's own measured
         # floor (2026-08-27, 3 episodes: 1.020/1.029/1.035) is ~1.03g, so the band
-        # is sized to catch a broken pedal-hold/inversion path (near 0 or near
-        # peak-g), not to match a number from a different car.
         print(f"SLAM mean avg_g = {slam_mean:.3f} "
               f"({'PASS' if 0.7 <= slam_mean <= 1.05 else 'FAIL'}, band is 0.7-1.05g; "
               f"this vehicle's measured floor is ~1.03g, not the ~0.85-0.95g figure "

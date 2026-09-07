@@ -66,9 +66,6 @@ log = None   # set in main() once the run dir (and therefore the log path) is kn
 # Defaults taken from the project's existing in-car trainers, not invented here:
 # SAC values match ml/SAC/MachineTrainerBoy/train_incar.py (the in-car fine-tune
 # config); PPO values match ml/PPO/PPO_V3_AxleCurriculum/train_ppo_axle.py, whose
-# LR was lowered 3e-4 -> 1e-4 and BATCH_SIZE raised 256 -> 512 after post-resume
-# updates proved crash-heavy at the higher rate. Residual v1 inherits the
-# already-tuned values rather than the plan's untuned first guesses.
 SAC_DEFAULTS = dict(lr=1e-4, buffer_size=100_000, tau=0.005,
                     target_entropy=-2.0, learning_starts=5_000, train_freq=2)
 PPO_DEFAULTS = dict(lr=1e-4, n_steps=2048, batch_size=512, n_epochs=10,
@@ -79,8 +76,6 @@ PPO_DEFAULTS = dict(lr=1e-4, n_steps=2048, batch_size=512, n_epochs=10,
 # net_arch/activation match the reference trainers exactly (train.py's
 # policy_kwargs for SAC, train_ppo_axle.py's for PPO), SB3's own defaults
 # (64x64 tanh for PPO, 256x256 relu for SAC) are NOT these, and silently
-# training on the wrong network makes every result incomparable to the
-# reference runs this project's numbers are judged against.
 POLICY_KWARGS_SAC = dict(activation_fn=th.nn.ReLU,
                          net_arch=dict(pi=[256, 256, 256], qf=[256, 256, 256]))
 POLICY_KWARGS_PPO = dict(activation_fn=th.nn.ReLU,
@@ -150,9 +145,6 @@ class LogMirrorCallback(BaseCallback):
     # 500 steps was ~half an episode when an episode was ~1084 steps. Under
     # free-running an episode is nearer 50, so 500 meant the per-run file did
     # not appear until episode 10 and then jumped ten at a time, the monitor
-    # looked frozen because there was genuinely nothing to read. Mirroring on
-    # episode end makes the cadence follow episodes rather than a step count
-    # that no longer means the same thing in both modes.
     def __init__(self, src_path, dst_path, skip_lines=0, every_n_steps=50, verbose=0):
         super().__init__(verbose)
         self.src_path = src_path
@@ -300,8 +292,6 @@ def make_venv(args):
     # Pedal position keys a calibration row: the references are measured at a
     # specific pedal, and a half-pedal stop physically cannot reach the
     # full-pedal lockup floor. Scored against those anchors it lands far BELOW
-    # "locked wheels" however well it modulates, indistinguishable from
-    # failing. So a normalized run needs a row per pedal level it can draw.
     pedal_spec = parse_pedal_spec(args.pedal)
     if spec.normalize and pedal_spec is not None:
         # A continuous range is no longer refused outright: fast calibration
@@ -475,7 +465,6 @@ def load_resume(args, venv):
     # This trainer's own save layout is <run_dir>/vecnormalize.pkl (see main()); the
     # "<stem>_vecnorm.pkl" convention is checked too for compatibility with the
     # project's other trainers, but a --resume onto one of THIS trainer's own
-    # checkpoints only ever matches the first form.
     candidates = [
         os.path.join(os.path.dirname(args.resume), "vecnormalize.pkl"),
         os.path.splitext(args.resume)[0] + "_vecnorm.pkl",

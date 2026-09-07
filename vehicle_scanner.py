@@ -16,8 +16,6 @@ import zipfile
 # Models the shipped ML-ABS controller mod actually targets (see assets/mods/
 # mtb_ml_abs, its jbeam declares an etk800-only slotType). Selecting any
 # other model still works mechanically (you can train/deploy a standard ABS
-# replacement), but the reward/gates/controller were only ever validated on
-# this one, the GUI shows a warning rather than a silent wrong assumption.
 SUPPORTED_ML_ABS_MODELS = {"etk800"}
 
 
@@ -117,9 +115,6 @@ def unique_model_labels(models):
 # --- ML ABS part check -----------------------------------------------------
 # The in-car training loop needs the ML ABS controller present on the car: the
 # env spawns, slams the brakes, then waits for the controller to publish
-# mlabs_active. A .pc without that part never publishes anything, so the wait
-# times out with "active=None", an error that describes the symptom and not
-# the cause, two minutes after the game booted.
 ML_ABS_PART_PREFIX = "etk_DSE_ABS_MTB_ML"
 ABS_SLOT_HINT = "ABS"
 
