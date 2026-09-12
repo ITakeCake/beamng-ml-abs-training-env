@@ -300,10 +300,10 @@ torques FR/FL 3100 Nm, RR/RL 1700 Nm.
 | 0.45 | 1.002 | 65.0 m |
 | 0.55 | 0.781 | 83.4 m |
 
-A constant 0.35 release beat every policy this project had trained. The optimum is
-roughly 0.05 wide. PPO-57's converged action distribution had a deterministic mean
-of 0.277 and exploration std of 0.21, four times wider than the peak it needed.
-That is why runs converged to ~1.05 g: noise smeared them across a sharp optimum.
+A constant 0.35 release beat every policy this project had trained. This table
+is one sweep; RESULTS.md section 2.2 pools every constant-release stop on
+record. PPO-57's converged action distribution had a deterministic mean of
+0.277 and exploration std of 0.21.
 
 ### 5.3 Closed-loop slip control, 100 Hz
 
@@ -318,9 +318,8 @@ That is why runs converged to ~1.05 g: noise smeared them across a sharp optimum
 | proportional, target 0.21, kp 6 | 0.968 |
 | proportional, target 0.21, kp 10 | 0.973 |
 
-At 100 Hz, closed-loop slip regulation is worse than the best constant. Gain makes
-it worse still. Both are the signature of a delay-limited loop: by the time slip is
-measured past target, the correction arrives a control period late.
+At 100 Hz every proportional regulator scored below the best constant (1.119).
+Within each target, higher kp scored lower.
 
 ### 5.4 Control rate
 
@@ -346,20 +345,18 @@ and DynamicABS both run in-vehicle at the full 2 kHz.
 | proportional 0.18, kp 6 | | | 1.151 |
 | **proportional 0.12, kp 6** | | | **1.189** |
 
-A three-line P regulator at 400 Hz stops at **1.189 g**, past the goal and within
-noise of stock ABS (1.199). Control rate, not policy capacity, was gating
-closed-loop braking.
+One stop per cell. The proportional regulator at target 0.12, kp 6, 400 Hz
+stopped at 1.189 g, above the 1.180 goal and 0.010 below stock ABS (1.199).
+Every proportional regulator measured at more than one rate scored higher at
+the higher rate. The constant scored 1.119, 1.118, 1.104.
 
-The kp 6 regulator that was unstable at 100 Hz (0.999) matches the best at 200 Hz.
-Doubling rate does nothing for the constant (correctly, it has no feedback to
-delay) and lifts every closed-loop controller.
+### 5.6 What these measurements show
 
-### 5.6 Conclusions
-
-- The co-sim channel is not the ceiling. At 400 Hz a scripted P regulator reaches
-  1.189 g through it.
-- Exploration width is a first-class problem: the target is a narrow ridge.
-- Control rate, not policy capacity, was the bottleneck for closed-loop controllers.
+- A scripted controller through the co-sim channel reached 1.189 g at 400 Hz.
+  Every RL run before this measurement was at 100 Hz, where the same class of
+  controller scored below 1.10.
+- The best RL policy at 100 Hz (PPO-39, 1.059) scored below the best constant
+  release at 100 Hz (1.119).
 
 
 ## 6. Performance notes
@@ -403,22 +400,22 @@ in Python. Achieved g degrades monotonically with per-step Python cost:
 | harness | per-step Python | avg_g, episode 2+ |
 |---|---|---|
 | probe, no learning | . | 1.187 to 1.196 |
-| DummyVecEnv + VecNormalize | ~1.3 ms | 1.187 |
+| DummyVecEnv + VecNormalize | 1.3 ms | 1.187 |
 | model.learn(), no callbacks | 1.6 to 1.7 ms | 1.01 to 1.17 |
 | model.learn() + diagnostics | 1.9 to 2.0 ms | 0.71 to 0.75 |
 | full trainer | . | 0.60 to 0.64 |
 
-This is a property of the trainer, not the policy. The identical weights hold
-1.19 g indefinitely under lighter loops. Mitigations: train at 200 Hz (5 ms
-budget), or disable per-step diagnostics at 400 Hz.
+The same weights scored 1.187 to 1.196 in the probe harness. Mitigations:
+train at 200 Hz (5 ms budget), or disable per-step diagnostics at 400 Hz.
 
 ### 6.4 400 Hz episode log distortion
 
-PPO-71 logged ~0.73 g while stopping at 1.19 g. This distortion is specific to
-400 Hz. At 100 Hz the same overhead is a fifth of a 10 ms period and harmless.
+PPO-71's training log has a last-20 mean of 0.852 g. A checkpoint probe of the
+same weights measures 1.185 g (n=16). At 100 Hz, PPO-57's log last-20 mean
+(0.975) and checkpoint probe (0.996, n=6) differ by 0.02.
 
 Rule: judge any 400 Hz run by evaluating its checkpoint, never by its episode
-log. Historical 100 Hz results stand.
+log.
 
 ### 6.5 Two framework bugs found (2026-09-06)
 
@@ -454,8 +451,8 @@ environment. Supports both SAC and PPO.
 | Zero-action reproduces lockup baseline | 1.028 g mean | PASS |
 | Scripted release beats slam mean | 1.043 g mean (+0.015 g) | PASS |
 
-The release mechanism reaches the wheels. The margin is thin on dry asphalt,
-where there is almost no headroom above a hard slam.
+The release mechanism reaches the wheels. The margin over slam on dry asphalt
+at 60 mph is 0.015 g.
 
 ### 8.2 CLI examples
 
@@ -487,9 +484,8 @@ a 200k checkpoint with `--total-steps 200000` does nothing. Pass 500000 to add
 Teleport, accelerate, arm the 2 kHz slam latch, read `avg_g_arc`. Stores
 median + spread to `calibration/<car>.json` keyed by (grip, speed, radius).
 
-GUI: "Calibrate baselines" over the current training matrix. Cost: roughly
-160 stops for 3 speeds x 3 grips x 3 radii x 2 refs x 3 reps. One-time per
-car, cached.
+GUI: "Calibrate baselines" over the current training matrix. Cost: 162 stops
+for 3 speeds x 3 grips x 3 radii x 2 refs x 3 reps. One-time per car, cached.
 
 The reward refuses to train a configuration that has no calibration row.
 

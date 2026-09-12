@@ -52,10 +52,10 @@ stock ABS at full pedal. Source: `calibration/etk800.json`.
 ![constant release](charts/constant_release_100hz.png)
 
 One fixed brake release held for the whole stop, no feedback. The best constant
-(release 0.35, 1.115 g) beats every RL policy the project trained. The usable
-window is about 0.05 wide. PPO-57's converged action distribution had a
-deterministic mean of 0.277 and an exploration std of 0.21, four times wider
-than the peak (REFERENCE.md section 5.2). Sources: `const_100hz_low.csv`,
+(release 0.35, 1.115 g, n=4) beats every RL policy the project trained.
+Release 0.30 gives 1.016 (n=5) and release 0.40 gives 1.065 (n=4). PPO-57's converged action
+distribution had a deterministic mean of 0.277 and an exploration std of 0.21
+(REFERENCE.md section 5.2). Sources: `const_100hz_low.csv`,
 `const_cosim_100hz.csv`, `slip_ceiling_probe2.csv`.
 
 
@@ -69,7 +69,7 @@ The policy talks to the game through BeamNG's co-simulation coupling. The
 control period is set by `time3rdParty`; physics runs at 2 kHz. At 100 Hz a
 proportional slip regulator with kp 6 is worse than the best constant (0.999 vs
 1.119). At 400 Hz the same regulator reaches 1.173, and target 0.12 reaches
-1.189. The constant does not move with rate (it has no feedback to delay).
+1.189. The constant moves 0.015 across the three rates.
 
 Every RL run before this measurement was at 100 Hz. Sources: `slip_ceiling_probe2.csv`
 (100 Hz), `probe_200hz.csv`, `probe_400hz.csv`. One stop per point.
@@ -98,11 +98,11 @@ The teacher reads ground-truth slip. The student cannot. It reads the same
 | DAgger 2 | + states DAgger 1 visited | 63,836 | 1.044 (n=6) |
 | DAgger 3 | + states DAgger 2 visited **with gaussian action noise sd 0.04** | . | **1.195 (n=16)** |
 
-Deterministic DAgger plateaued at 1.04 for two iterations, with per-stop
-values spanning 0.85 to 1.21 inside one evaluation. Collecting with the
-student perturbed put the states it fell off into the dataset with teacher
-labels. That was the step that moved it. Sources: `bc_eval.csv`, `d1_eval.csv`,
-`d2_eval.csv`, `d3_confirm.csv`.
+DAgger 1 and 2 collected with the student acting deterministically and
+plateaued at 1.04, with per-stop values spanning 0.85 to 1.21 inside one
+evaluation. DAgger 3 collected with gaussian noise on the student's actions and
+reached 1.195. Sources: `bc_eval.csv`, `d1_eval.csv`, `d2_eval.csv`,
+`d3_confirm.csv`.
 
 ### 3.4 Per-wheel actions
 
@@ -136,9 +136,10 @@ training log or 1.06 in evaluation. The control-rate measurement in section
 Thirteen runs (PPO-60 to PPO-70, PPO-72, PPO-73) trained at 400 Hz or with the
 v11 reward at 100 Hz. All but PPO-71 were stopped early by hand with no
 evaluation. At 400 Hz the control period is 2.5 ms and the trainer's per-step
-Python cost is 1.6 to 2.0 ms of it, so the training-log g is unreliable
-(PPO-71 logged 0.85 while its checkpoint measures 1.185). These runs have no
-trustworthy g. They are marked with an x on the chart.
+Python cost is 1.6 to 2.0 ms of it. Measured g falls as that cost rises
+(REFERENCE.md section 6.3), and PPO-71 logged 0.85 while its checkpoint
+measures 1.185. The training-log g at 400 Hz is not a measurement of the
+policy. These runs have no trustworthy g. They are marked with an x on the chart.
 
 PPO-71, the one completed 400 Hz run, started from BC-D3 (1.195) with a
 learning rate of 1e-5 and finished at 1.185 (n=16). Fine-tuning made it worse.
@@ -163,7 +164,7 @@ drops to 1.178 and one stop of four fell to 1.145. Sources: `noise_*.csv`.
   reproduced the NaN.
 - The co-sim UDP link did not drain between episodes. Up to 1618 stale packets
   (4 s at 400 Hz) fed the observation stack at the start of every episode. Found
-  and fixed 2026-09-06. Every run before that was affected.
+  and fixed 2026-09-06. Every run before that ran with this bug.
 - `PPO.load()` ignored the configured learning rate on resume, so every fine-tune
   before 2026-09-06 ran at the checkpoint's original 3e-4 while logging 1e-5.
   Fixed the same day.
@@ -183,12 +184,6 @@ The data does not say why these happened. No cause is claimed.
 - PPO-71 finishing below its BC-D3 starting point. Cause not recorded.
 - Below pedal 0.71, stock ABS stops 0.01 to 0.03 g shorter than no ABS at the
   same pedal (section 2.1). Not investigated.
-- The co-sim to in-car deployment gap is open. The per-axle policy measures
-  1.166 through co-sim (`deploy_final.csv`) and about 1.10 when the exported
-  weights run inside the interactive game (in-car measurement made outside
-  this repository). Inference was verified exact on real in-car observations.
-  Stale graphics-rate wheel speeds were found and fixed with no change in g.
-  The gap remains.
 
 
 ## 6. Run history
