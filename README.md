@@ -59,7 +59,16 @@ Or launch `gui_train.py` and select the residual backend. Supports SAC and PPO.
 - `train_cosim.py`: co-sim PPO trainer (the GUI's default backend).
 - `train_residual.py`: legacy in-car SAC/PPO trainer.
 - `bounded_ppo.py`: affine-tanh action distribution and checkpoint contract.
-- `distill_teacher.py`: supervised distillation from a privileged teacher.
+
+**Distillation (teacher to student):**
+
+- `slip_ceiling_probe.py`: scripted teachers (constant release, bang-bang,
+  proportional slip regulator) through the co-sim env, with `--record` and
+  `--dagger` for collecting (obs, act) pairs.
+- `record_dynamicabs_teacher.py`: records the DynamicABS-Trainer 400 Hz classical
+  controller as a teacher via an in-game Lua recorder. Works on BeamNG.drive.
+- `distill_teacher.py`: supervised distillation from a recorded teacher into the
+  same PPO network `train_cosim.py` trains.
 
 **GUI:**
 
@@ -103,7 +112,12 @@ Or launch `gui_train.py` and select the residual backend. Supports SAC and PPO.
 **In-game:**
 
 - `abstelemetry.lua`: telemetry bridge and per-wheel brake control (2 kHz).
-- `assets/`: the BeamNG mod (ABS controller Lua, jbeam parts, reference car configs).
+- `assets/mods/mtb_ml_abs/`: the ML ABS mod (policy controller Lua, jbeam part,
+  telemetry bridge).
+- `assets/mods/dynamicabs_trainer/`: the DynamicABS-Trainer classical PID slip
+  regulator (400 Hz) plus its 400 Hz recorder extension, used as a teacher.
+- `assets/cars/etk800/`: reference car configs. The teacher car is the student car
+  with only the ABS slot swapped (enforced by test).
 
 **Tests:**
 

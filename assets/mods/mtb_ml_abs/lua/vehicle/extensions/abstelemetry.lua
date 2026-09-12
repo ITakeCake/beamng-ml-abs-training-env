@@ -1227,9 +1227,8 @@ local function buildSensorData()
     gz_avg = (pollFrames > 0) and (pollGzSum / pollFrames) or 0,
     gz_min = pollGzSmoothedMin ~= 999999 and pollGzSmoothedMin or 0,
     gz_max = pollGzSmoothedMax ~= -999999 and pollGzSmoothedMax or 0,
-    -- pitch/roll: ground-truth orientation (gyro-estimate experiment REVERTED
-    -- 2026-07-11 per Blake, "for now". The gyro-integrated values stay published
-    -- as pitch_gyro/roll_gyro DEBUG channels only, never fed to the model).
+    -- pitch/roll: ground-truth orientation. Gyro-integrated estimates stay
+    -- published as pitch_gyro/roll_gyro debug channels only, never fed to the model.
     pitch = (function()
       local d = obj:getDirectionVector()
       local horiz = math.sqrt(d.x * d.x + d.y * d.y)

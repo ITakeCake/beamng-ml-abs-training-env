@@ -1,0 +1,8 @@
+{
+    "title":"DynamicABS Trainer 400Hz",
+    "description":"Classical per-wheel PID slip regulator at 400 Hz, used as the distillation teacher for the ML ABS policy. Publishes per-wheel brake commands as electrics and bundles the 400 Hz recorder extension.",
+    "version":"1.0.0",
+    "author":"Blake",
+    "category":"Vehicles / Parts",
+    "tags":["abs","teacher","distillation","etk800"]
+}

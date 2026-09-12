@@ -13,8 +13,10 @@ import random
 import csv
 import json
 
+import sim_config
+
 # --- CONFIGURATION (BeamNG.tech, headless / no-graphics) ---
-BNG_HOME = r"C:\Users\Blake\Desktop\BeamNG.tech\BeamNG.tech.v0.37.6.0"
+BNG_HOME = sim_config.autodetect_game_folder("tech") or ""
 
 MAP_NAME   = 'smallgrid'                                 # flat gridmap
 START_POS  = (0, 0, 0.5)

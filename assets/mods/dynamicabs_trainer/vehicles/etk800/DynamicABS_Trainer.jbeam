@@ -1,0 +1,738 @@
+{
+    "etk_DSE_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "etk_DSE_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "etk800_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "etk800_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "etkc_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "etkc_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "etki_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "etki_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "bx_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "bx_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "covet_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "covet_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "pessima_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "pessima_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "midsize_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "midsize_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "fullsize_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "fullsize_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "legran_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "legran_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "sunburst2_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "sunburst2_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "lansdale_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "lansdale_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "wendover_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "wendover_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "bastion_DSE_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "bastion_DSE_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "sbr_DSE_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "sbr_DSE_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "scintilla_DSE_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "scintilla_DSE_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "sunburst2_DSE_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "sunburst2_DSE_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "vivace_DSE_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "vivace_DSE_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "hopper_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "hopper_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "pickup_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "pickup_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "rockbouncer_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "rockbouncer_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "van_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "van_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    },
+    "pigeon_DynABS_Trainer": {
+        "information": {
+            "authors": "Blake",
+            "name": "DynamicABS Trainer 400Hz",
+            "value": 250
+        },
+        "slotType": "pigeon_ABS",
+        "pressureWheels": [
+            [
+                "name",
+                "hubGroup",
+                "group",
+                "node1:",
+                "node2:",
+                "nodeS",
+                "nodeArm:",
+                "wheelDir"
+            ],
+            {
+                "enableABS": false
+            }
+        ],
+        "controller": [
+            [
+                "fileName"
+            ],
+            [
+                "DynamicABS_Trainer",
+                {}
+            ]
+        ]
+    }
+}

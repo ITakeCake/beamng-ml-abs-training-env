@@ -1,5 +1,5 @@
-"""Grip spec parsing: three modes Blake specified, off/stock (never touch),
-a concrete level, or randomized between runs. Pure, no game imports."""
+"""Grip spec parsing: three modes, off/stock (never touch), a concrete level,
+or randomized between runs. Pure, no game imports."""
 import os
 import random
 import sys
