@@ -6,7 +6,7 @@ data via a Lua recorder extension, and post-processes into the same (obs, act)
 npz format that distill_teacher.py consumes.
 
     python record_dynamicabs_teacher.py --reps 6 --out teacher_dabs_400hz.npz
-    python distill_teacher.py --data teacher_dabs_400hz.npz --config .gui-configs/PPO-63.json
+    python distill_teacher.py --data teacher_dabs_400hz.npz --config docs/data/distill_config.json
 """
 import argparse
 import csv

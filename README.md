@@ -1,8 +1,18 @@
-# Reinforcement Learning Based Anti-Lock Braking Systems
+# Learned Anti-Lock Braking in BeamNG
 
-This is a collection of my PPO/SAC experiments on anti-lock braking systems inside of beamng.drive and beamng.tech (Tyvm beamng for the .tech license).
-Currently this project is not suitable for full time use inside of beamng, just yet, as it does not meet or exceed stock ABS performance.
-This project is still in active development and experimentation.
+A training environment for anti-lock braking controllers inside BeamNG.drive
+and BeamNG.tech, built around the game's co-simulation coupling and its own
+2 kHz brake metric. PPO and SAC reinforcement learning, supervised distillation
+from scripted and classical teachers, and the tooling to measure all of it
+against stock ABS on the same car and test.
+
+**Where it stands (2026-09-09):** a sensor-only policy network distilled from a
+400 Hz scripted slip regulator stops at 1.195 g on an etk800 at 80 mph. Stock
+ABS stops at 1.199 g. The policy does not beat stock ABS. Reinforcement
+learning alone reached 1.059 g. The full record, including what failed and
+what is unexplained, is in **[docs/RESULTS.md](docs/RESULTS.md)**.
+
+![headline](docs/charts/headline.png)
 
 ## The idea
 
@@ -125,8 +135,12 @@ Or launch `gui_train.py` and select the residual backend. Supports SAC and PPO.
 
 **Docs:**
 
-- `docs/REFERENCE.md`: complete technical reference (reward, GUI contract, control
-  ceiling measurements, performance notes, the 1.19 g result).
+- `docs/RESULTS.md`: what worked, what did not, what is unexplained, with charts.
+- `docs/REFERENCE.md`: technical reference (reward design, GUI contract, config
+  schema, performance notes).
+- `docs/data/`: the per-stop CSVs behind every chart, and `runs_table.csv`, one
+  row per training run.
+- `docs/make_charts.py`: regenerates `docs/charts/` from `docs/data/`.
 
 ## The metric
 

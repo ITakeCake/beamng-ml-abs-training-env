@@ -20,6 +20,7 @@ gui_state.json
 *.csv
 !calibration/*.csv
 !tests/fixtures/*.csv
+!docs/data/**/*.csv
 evaluations/
 experiments/
 best_models/

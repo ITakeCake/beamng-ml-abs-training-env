@@ -16,7 +16,7 @@ sensors alone or RL will immediately undo it.
 
     python slip_ceiling_probe.py --dt 0.0025 --reps 6 --releases "" \
         --targets "" --prop "0.12:6" --record teacher_400hz.npz
-    python distill_teacher.py --data teacher_400hz.npz --config .gui-configs/PPO-63.json
+    python distill_teacher.py --data teacher_400hz.npz --config docs/data/distill_config.json
 """
 import argparse
 import json

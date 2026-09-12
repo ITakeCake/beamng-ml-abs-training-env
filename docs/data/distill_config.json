@@ -1,0 +1,16 @@
+{
+  "run_name": "distill",
+  "wheel_mode": "independent",
+  "device": "cpu",
+  "control_hz": 400,
+  "reward": "v11.0",
+  "speeds": [80],
+  "vehicle_pc": "vehicles/etk800/Machine-Trainer-Boy-V2-MLABS.pc",
+  "ppo": {
+    "n_steps": 8192,
+    "batch_size": 512,
+    "initial_release": 0.5,
+    "log_std_init": -3.0,
+    "net_arch": [256, 256, 256]
+  }
+}

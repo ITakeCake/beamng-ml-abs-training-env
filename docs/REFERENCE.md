@@ -1,8 +1,9 @@
 # Reference
 
-Complete technical reference for the ML-ABS training environment. Covers the
+Technical reference for the ML-ABS training environment. Covers the
 action space, reward design, GUI contract, experiment workflow, measured control
-ceiling, performance notes, the 1.19 g result, and the legacy residual backend.
+ceiling, performance notes, and the legacy residual backend. Results are in
+RESULTS.md.
 
 
 ## 1. Action space: release from pedal
@@ -433,71 +434,11 @@ the config's value. The resume path now assigns the run's configuration
 explicitly.
 
 
-## 7. Results: 1.19 g (2026-09-06)
+## 7. Results
 
-| checkpoint | what it is | mean avg_g | 95% CI | >= 1.18 |
-|---|---|---:|---|---:|
-| **`runs/PPO-71/`** | RL-trained, 1.5M PPO steps, reward v11, 400 Hz | **1.1853** | [1.1825, 1.1882] | 13/16 |
-| **`runs/BC-D3/`** | distilled starting point (no RL) | **1.1952** | [1.1931, 1.1973] | 16/16 |
-
-### 7.1 What BC-D3 is
-
-The same `UnitIntervalActorCriticPolicy` network `train_cosim.py` trains: 3x256,
-four wheel-release outputs. Reads only the honest observation vector: wheel
-speeds, stock-ABS-estimated slip, applied brake torques, IMU. No ground-truth
-speed reaches the network at training time or at run time.
-
-Weights come from supervised distillation. A scripted per-wheel proportional
-slip regulator (`release = 6 * (slip - 0.10)`, running at 400 Hz, scoring
-1.192 to 1.201 g) was recorded through the real env. The policy was fitted to
-its actions. The teacher reads ground-truth slip. The student never does and
-has to reproduce the behaviour from sensors alone.
-
-Machine-Trainer-Boy, 80 mph, dry, straight. 16 consecutive stops:
-
-```
-mean 1.1952 g   sd 0.0043   95% CI [1.1931, 1.1973]
-min 1.1861      max 1.2003      16/16 over the 1.180 goal
-mean stopping distance 54.50 m
-```
-
-References: locked wheel 0.979 g, stock ABS 1.199 g, DynamicABS 1.205 g.
-
-### 7.2 Distillation pipeline
-
-| stage | pairs | avg_g in sim |
-|---|---:|---|
-| teacher (privileged slip) | . | 1.192 to 1.201 |
-| BC iteration 0 | 23,676 | 0.62 to 0.83 (mean 0.72) |
-| DAgger iteration 1 | 42,523 | 0.85 to 1.208 (mean 1.04) |
-| DAgger iteration 2 | 63,836 | 0.99 to 1.130 (mean 1.04) |
-| DAgger iteration 3 (perturbed) | . | 1.187 to 1.201 (mean 1.194) |
-
-Perturbing the student during collection was the step that mattered.
-Deterministic DAgger plateaued bimodal at ~1.04 g. Adding noise put the states
-the policy fell off into the dataset with teacher labels.
-
-### 7.3 Reproduce
-
-```bash
-# measure the checkpoint
-python slip_ceiling_probe.py --reps 16 --dt 0.0025 --releases "" --targets "" \
-    --policy runs/BC-D3
-
-# rebuild from scratch: record the teacher
-python slip_ceiling_probe.py --reps 8 --dt 0.0025 --releases "" --targets "" \
-    --prop "0.10:6" --record teacher.npz
-
-# distill
-python distill_teacher.py --data teacher.npz --config .gui-configs/PPO-65.json \
-    --out runs/BC-1 --epochs 80
-
-# DAgger with the student perturbed
-python slip_ceiling_probe.py --reps 14 --dt 0.0025 --releases "" --targets "" \
-    --policy runs/BC-1 --policy-noise 0.04 --dagger "0.10:6" --record dagger.npz
-```
-
-Merge datasets, redistill, repeat.
+See [RESULTS.md](RESULTS.md): headline numbers, the distillation chain,
+what did not work, what is unexplained, and the run history. The per-stop
+data is under `docs/data/` and `docs/make_charts.py` regenerates the charts.
 
 
 ## 8. Legacy residual backend

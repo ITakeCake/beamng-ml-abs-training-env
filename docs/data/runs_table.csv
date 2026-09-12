@@ -1,0 +1,82 @@
+run,kind,reward,control_hz,wheel_mode,speeds,total_steps,steps_done,n_episodes,best_g,last20_mean_g,all_mean_g,status,eval_g,log_unreliable,hypothesis,notes
+PPO-01,ppo,,,,,,,0,,,,has_final,,false,,first_log_ts=2026-08-29
+PPO-02,ppo,,,,,,,0,,,,has_final,,false,,first_log_ts=2026-08-30
+PPO-03,ppo,,,,,,,1,0.7339,0.7339,0.7339,unknown,,false,,first_log_ts=2026-08-30
+PPO-05,ppo,,,,,,,13,0.9901,0.9111,0.9111,has_final,,false,,first_log_ts=2026-08-30
+PPO-06,ppo,,,,,,,0,,,,has_final,,false,,first_log_ts=2026-08-30
+PPO-07,ppo,,,,,,,16,0.9694,0.9058,0.9058,has_final,,false,,first_log_ts=2026-08-30
+PPO-10,ppo,,,,,,,132,1.0025,0.9071,0.914,has_final,,false,,first_log_ts=2026-08-30
+PPO-11,ppo,,,,,,,5,1.0134,0.9829,0.9829,has_final,,false,,first_log_ts=2026-08-30
+PPO-12,ppo,,,,,,,0,,,,has_final,,false,,episode log has avg_g=0 on every row (brake metric not recorded); first_log_ts=2026-08-30
+PPO-20,ppo,,100,axle,100,20000,,0,,,,has_final,,false,,net 256x256x256; lr 0.0001; episode log has avg_g=0 on every row (brake metric not recorded); first_log_ts=2026-08-30
+PPO-21,ppo,,100,axle,80,200000,,0,,,,has_final,,false,,net 256x256x256; lr 0.0001; episode log has avg_g=0 on every row (brake metric not recorded); first_log_ts=2026-08-30
+PPO-22,ppo,,100,axle,80,200000,,0,,,,stopped,,false,,net 256x256x256; lr 0.0001; episode log has avg_g=0 on every row (brake metric not recorded); first_log_ts=2026-08-31
+PPO-23,ppo,,100,axle,80,20000,,0,,,,stopped,,false,,net 256x256x256; lr 0.0001; episode log has avg_g=0 on every row (brake metric not recorded); first_log_ts=2026-08-31
+PPO-24,ppo,,100,axle,80,200000,,0,,,,stopped,,false,,net 256x256x256; lr 0.0001; episode log has avg_g=0 on every row (brake metric not recorded); first_log_ts=2026-08-31
+PPO-25,ppo,,100,axle,80,200000,,0,,,,stopped,,false,,net 256x256x256; lr 0.0001; episode log has avg_g=0 on every row (brake metric not recorded); first_log_ts=2026-08-31
+PPO-26,ppo,,100,axle,80,200000,,0,,,,stopped,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-08-31
+PPO-27,ppo,,100,axle,80,200000,,0,,,,stopped,,false,,net 256x256x256; lr 0.0001; episode log has avg_g=0 on every row (brake metric not recorded); first_log_ts=2026-08-31
+PPO-28,ppo,,100,axle,80,200000,,0,,,,stopped,,false,,net 256x256x256; lr 0.0001; episode log has avg_g=0 on every row (brake metric not recorded); first_log_ts=2026-08-31
+PPO-29,ppo,,100,axle,80,1000000,,0,,,,stopped,,false,,net 256x256x256; lr 0.0001; episode log has avg_g=0 on every row (brake metric not recorded); first_log_ts=2026-08-31
+PPO-29-3,ppo,v6.0,100,axle,80,5000000,3639170,5565,1.0767,0.9412,0.943,stopped,,false,,resumed from PPO-39-resume-1; net 256x256x256; lr 0.0001; first_log_ts=2026-09-03
+PPO-30,ppo,,100,axle,80,1000000,,0,,,,stopped,,false,,net 256x256x256; lr 0.0001; episode log has avg_g=0 on every row (brake metric not recorded); first_log_ts=2026-08-31
+PPO-31,ppo,,100,axle,80,200000,,0,,,,stopped,,false,,net 256x256x256; lr 0.0001; episode log has avg_g=0 on every row (brake metric not recorded); first_log_ts=2026-08-31
+PPO-32,ppo,,100,axle,80,1000000,,0,,,,stopped,,false,,net 256x256x256; lr 0.0001; episode log has avg_g=0 on every row (brake metric not recorded); first_log_ts=2026-08-31
+PPO-33,ppo,,100,axle,80,1000000,,1650,1.0099,0.8746,0.891,has_final,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-08-31
+PPO-34,ppo,,100,axle,80,100000,,,,,,unknown,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-08-31
+PPO-35,ppo,,100,axle,80,200000,,151,0.9895,0.9119,0.9118,stopped,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-08-31
+PPO-36,ppo,v6.0,100,axle,80,200000,,345,0.991,0.9544,0.9472,has_final,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-08-31
+PPO-37,ppo,v6.0,100,axle,80,200000,,385,0.9943,0.9512,0.9428,has_final,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-08-31
+PPO-38,ppo,v6.0,100,axle,80,1000000,,959,1.1098,0.9353,0.9509,unknown,0.9847,false,"Original 1,000,000-step v6.0 bounded-PPO run; retrospective audit tests whether its reported late regression is artifact corruption or non-finite training.",net 256x256x256; frozen eval PPO-38_frozen_2026-09-02: best ckpt step 251904 of 10 ckpts; lr 0.0001; first_log_ts=2026-09-01
+PPO-39,ppo,v6.0,100,axle,80,1000000,287000,488,0.9581,0.9237,0.9289,training,,false,"With identical v6.0 reward and PPO settings but an independent recorded seed, the training run will show whether PPO-38's mid-run high-G policy followed by front-lock/chatter regression is reproducible rather than a one-run accident.",net 256x256x256; lr 0.0001; crash: PermissionError: [WinError 5] Access is denied: 'runs/PPO-39/.run_state.json.gdl0ak; first_log_ts=2026-09-02
+PPO-39-2,ppo,v6.0,100,axle,80,5000000,895090,82,1.0551,0.9767,0.9801,stopped,,false,,resumed from PPO-39-resume-1; net 256x256x256; lr 0.0001; first_log_ts=2026-09-02
+PPO-39-resume-1,ppo,v6.0,100,axle,80,1000000,1001472,1498,1.1159,0.9896,0.9903,completed,1.0594,false,"PPO-39 can continue to the original 1000000-step target from its verified 251904-step model and VecNormalize pair without changing its reward, PPO settings, vehicle, scenario, observation/action contract, or physics after hardening only the transient status-write path.",resumed from PPO-39; net 256x256x256; frozen eval PPO-39_frozen_2026-09-03: best ckpt step 851968 of 9 ckpts; lr 0.0001; first_log_ts=2026-09-02
+PPO-40,ppo,v7.0,100,axle,80,500000,50830,88,0.9559,0.9295,0.9309,stopped,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-09-03
+PPO-41,ppo,v7.0,100,independent,80,500000,10250,17,0.9471,0.9332,0.9332,stopped,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-09-03
+PPO-42,ppo,v7.0,100,independent,80,500000,0,,,,,failed,,false,,net 256x256x256; lr 0.0001; crash: beamngpy.logging.BNGDisconnectedError: The simulator ended the connection.; first_log_ts=2026-09-03
+PPO-43,ppo,v7.0,100,independent,80,100000,4276,6,0.9461,0.9322,0.9322,failed,,false,,net 256x256x256; lr 0.0001; crash: ConnectionRefusedError: [WinError 10061] No connection could be made because the target machine actively refused it; first_log_ts=2026-09-03
+PPO-44,ppo,v7.0,100,independent,80,100000,1076,1,0.9269,0.9269,0.9269,failed,,false,,net 256x256x256; lr 0.0001; crash: ConnectionRefusedError: [WinError 10061] No connection could be made because the target machine actively refused it; first_log_ts=2026-09-03
+PPO-45,ppo,v7.0,100,independent,80,100000,10,0,,,,stopped,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-09-03
+PPO-46,ppo,v7.0,100,independent,80,100000,0,,,,,failed,,false,,net 256x256x256; lr 0.0001; crash: beamngpy.logging.BNGDisconnectedError: The simulator ended the connection.; first_log_ts=2026-09-03
+PPO-47,ppo,v7.0,100,independent,80,100000,6545,8,0.6353,0.6116,0.6116,failed,,false,,net 256x256x256; lr 0.0001; crash: ConnectionRefusedError: [WinError 10061] No connection could be made because the target machine actively refused it; first_log_ts=2026-09-03
+PPO-48,ppo,v7.0,100,independent,80,500000,670,1,0.6921,0.6921,0.6921,stopped,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-09-03
+PPO-49,ppo,v7.0,100,independent,80,500000,261130,173,0.736,0.2743,0.4206,stopped,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-09-03
+PPO-50,ppo,v7.0,100,independent,80,200000,200704,368,1.0113,0.9398,0.8713,completed,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-09-03
+PPO-51,ppo,v6.0,100,axle,80,200000,200704,371,1.0635,0.9611,0.8851,completed,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-09-03
+PPO-52,ppo,v7.0,100,independent,80,2320000,2285568,3335,1.0191,0.5981,0.7133,failed,,false,,"net 256x256x256; lr 0.0001; crash: ValueError: Expected parameter loc (Tensor of shape (512, 4)) of distribution Normal(loc: torch.Size([512, 4]), scale: torch.Size([512, 4])); first_log_ts=2026-09-04"
+PPO-53,ppo,v7.0,100,independent,80,200000,204800,294,0.7638,0.6357,0.6582,completed,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-09-04
+PPO-54,ppo,v6.1,100,independent,80,3000000,614170,1165,1.0068,0.9529,0.9012,stopped,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-09-04
+PPO-55,ppo,v7.0,100,independent,80,2500000,632340,855,0.8589,0.6601,0.6119,stopped,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-09-04
+PPO-56,ppo,v8.0,100,independent,80,1000000,47660,72,0.8236,0.7301,0.701,stopped,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-09-04
+PPO-57,ppo,v8.0,100,independent,80,2000000,1491240,2924,1.0487,0.9749,0.9432,failed,,false,,net 512x512x512; lr 0.0001; crash: ConnectionRefusedError: [WinError 10061] No connection could be made because the target machine actively refused it; first_log_ts=2026-09-05
+PPO-58,ppo,v3.3,100,independent,80,3000000,203350,281,0.7192,0.6114,0.6259,stopped,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-09-06
+PPO-59,ppo,v9.0,100,independent,80,1500000,6470,9,0.6962,0.6604,0.6604,stopped,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-09-06
+PPO-60,ppo,v9.0,400,independent,80,1500000,84020,10,0.696,0.6226,0.6226,stopped,,true,,"net 256x256x256; lr 0.0001; 400 Hz: episode log understates g, use eval; first_log_ts=2026-09-06"
+PPO-61,ppo,v9.0,400,independent,80,1500000,391980,52,0.7524,0.5146,0.5674,stopped,,true,,"net 256x256x256; lr 0.0001; 400 Hz: episode log understates g, use eval; first_log_ts=2026-09-06"
+PPO-62,ppo,v9.0,400,independent,80,1500000,106500,15,0.9517,0.6346,0.6346,stopped,,true,,"net 256x256x256; lr 0.0001; 400 Hz: episode log understates g, use eval; first_log_ts=2026-09-06"
+PPO-63,ppo,v11.0,400,independent,80,1500000,493720,59,0.699,0.5675,0.532,stopped,,true,,"net 256x256x256; lr 0.0001; 400 Hz: episode log understates g, use eval; first_log_ts=2026-09-06"
+PPO-64,ppo,v11.0,400,independent,80,1500000,29650,7,1.1698,0.8931,0.8931,stopped,,true,,"resumed from BC-D2; net 256x256x256; lr 3e-05; 400 Hz: episode log understates g, use eval; first_log_ts=2026-09-06"
+PPO-65,ppo,v11.0,400,independent,80,1500000,57350,11,1.1823,0.873,0.873,stopped,,true,,"resumed from BC-D2b; net 256x256x256; lr 1e-05; 400 Hz: episode log understates g, use eval; first_log_ts=2026-09-06"
+PPO-66,ppo,v11.0,400,independent,80,1500000,31990,7,1.1787,0.6895,0.6895,stopped,,true,,"resumed from BC-D3; net 256x256x256; lr 1e-05; 400 Hz: episode log understates g, use eval; first_log_ts=2026-09-06"
+PPO-67,ppo,v11.0,400,independent,80,1500000,81930,13,1.1863,0.6784,0.6784,stopped,,true,,"resumed from BC-D3; net 256x256x256; lr 1e-05; 400 Hz: episode log understates g, use eval; first_log_ts=2026-09-06"
+PPO-68,ppo,v11.0,400,independent,80,1500000,40970,16,1.192,0.6912,0.6912,stopped,,true,,"resumed from BC-D3; net 256x256x256; lr 1e-05; 400 Hz: episode log understates g, use eval; first_log_ts=2026-09-06"
+PPO-69,ppo,v11.0,400,independent,80,1500000,50340,19,1.1841,0.6503,0.6503,stopped,,true,,"resumed from BC-D3; net 256x256x256; lr 1e-05; 400 Hz: episode log understates g, use eval; first_log_ts=2026-09-06"
+PPO-70,ppo,v11.0,400,independent,80,1500000,38240,19,1.1861,0.8153,0.8153,stopped,,true,,"resumed from BC-D3; net 256x256x256; lr 1e-05; 400 Hz: episode log understates g, use eval; first_log_ts=2026-09-06"
+PPO-71,ppo,v11.0,400,independent,80,1500000,1507328,753,1.1679,0.8518,0.8541,completed,1.1853,true,,"resumed from BC-D3; net 256x256x256; probe eval ppo71_confirm.csv n=16 mean=1.1853 min=1.1752 max=1.1941; lr 1e-05; 400 Hz: episode log understates g, use eval; first_log_ts=2026-09-06"
+PPO-72,ppo,v11.0,100,independent,80,5000000,631570,667,0.7858,0.4357,0.5024,stopped,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-09-09
+PPO-73,ppo,v11.0,100,independent,80,5000000,25130,40,0.7441,0.6566,0.6589,stopped,,false,,net 256x256x256; lr 0.0001; first_log_ts=2026-09-09
+BC-D1,bc,,400,independent,80,,,,,,,has_final,1.0375,false,,net 256x256x256; probe eval d1_eval.csv n=5 mean=1.0375 min=0.8478 max=1.2081; distilled checkpoint via distill_teacher.py (no episode log; config.json is the base config it inherited); first_log_ts=2026-09-06
+BC-D2,bc,,400,independent,80,,,,,,,has_final,1.0437,false,,net 256x256x256; probe eval d2_eval.csv n=6 mean=1.0437 min=0.9866 max=1.1300; distilled checkpoint via distill_teacher.py (no episode log; config.json is the base config it inherited); first_log_ts=2026-09-06
+BC-D2b,bc,,400,independent,80,,,,,,,has_final,1.096,false,,net 256x256x256; probe eval dagger3.csv n=14 mean=1.0960 min=0.9820 max=1.2020; distilled checkpoint via distill_teacher.py (no episode log; config.json is the base config it inherited); first_log_ts=2026-09-06
+BC-D3,bc,,400,independent,80,,,,,,,has_final,1.1952,false,,net 256x256x256; probe eval d3_confirm.csv n=16 mean=1.1952 min=1.1861 max=1.2003; distilled checkpoint via distill_teacher.py (no episode log; config.json is the base config it inherited); first_log_ts=2026-09-06
+BC-PPO-64,bc,,400,independent,80,,,,,,,has_final,0.723,false,,net 256x256x256; probe eval bc_eval.csv n=5 mean=0.7230 min=0.6156 max=0.8304; distilled checkpoint via distill_teacher.py (no episode log; config.json is the base config it inherited); first_log_ts=2026-09-06
+BISECT-DIAG,probe,,,,,,,,,,,unknown,,false,,first_log_ts=2026-09-06
+CONST035,probe,v11.0,100,axle,80,1500000,,,,,,has_final,,false,,net 256x256x256; first_log_ts=2026-09-06
+DEPLOY-BC0,deploy,,,axle,80,,,,,,,has_final,,false,,net 256x256x256; deployment export run (config.json is the inherited base config); first_log_ts=2026-09-06
+DEPLOY-BC1,deploy,,,axle,80,,,,,,,has_final,1.1192,false,,net 256x256x256; probe eval deploy_bc1.csv n=6 mean=1.1192 min=1.0762 max=1.1723; deployment export run (config.json is the inherited base config); first_log_ts=2026-09-06
+DEPLOY-D1,deploy,,,axle,80,,,,,,,has_final,1.1588,false,,net 256x256x256; probe eval deploy_d1.csv n=8 mean=1.1588 min=1.1517 max=1.1677; deployment export run (config.json is the inherited base config); first_log_ts=2026-09-06
+DEPLOY-D1R,deploy,,,axle,80,,,,,,,has_final,1.1661,false,,net 256x256x256; probe eval deploy_final.csv n=10 mean=1.1661 min=1.1626 max=1.1716; deployment export run (config.json is the inherited base config); first_log_ts=2026-09-06
+EVAL-PPO-57,probe,,,,,,,,,,,has_final,0.9963,false,,probe eval ppo57_eval.csv n=6 mean=0.9963 min=0.9617 max=1.0207; first_log_ts=2026-09-06
+corner_probe1,probe,,,,,,,5,0.7311,0.7118,0.7118,has_final,,false,,first_log_ts=2026-08-29
+corner_probe2,probe,,,,,,,8,0.7216,0.6989,0.6989,has_final,,false,,first_log_ts=2026-08-29
+ctl_corner_slam,probe,,,,,,,10,1.0253,1.0142,1.0142,has_final,,false,,first_log_ts=2026-08-29
